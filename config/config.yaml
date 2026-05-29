@@ -1,0 +1,109 @@
+# ORACLE HiChIP pipeline configuration
+# All paths are absolute; override per-run with --config key=value or a second --configfile.
+
+# ---------- I/O ----------
+samples_tsv: config/samples.tsv          # one row per HiChIP sample
+genome_yaml: config/genome.yaml          # genome paths + chromsizes
+fastq_dir:   "data/fastq"                # input FASTQs
+results_dir: "results"                   # all derived outputs
+
+# ---------- Genome ----------
+assembly: "hg38"                         # hg38 | T2T-CHM13 | mm10
+
+# ---------- Threads (per-rule overrides in Snakemake too) ----------
+threads:
+  fastqc: 4
+  fastp: 8
+  bwa: 24
+  pairtools: 8
+  cooler: 8
+  macs2: 4
+  fithichip: 16
+  diffhic: 8
+
+# ---------- Read QC ----------
+fastp:
+  quality_cutoff: 20
+  length_required: 36
+  adapter_sequence: "AGATCGGAAGAGC"            # standard Illumina TruSeq
+  adapter_sequence_r2: "AGATCGGAAGAGC"
+
+# ---------- bwa-mem(2) ----------
+bwa:
+  use_bwamem2: true                            # 2-3x faster than bwa-mem
+  flags: "-SP5M"                               # canonical HiC mode
+
+# ---------- pairtools ----------
+pairtools:
+  min_mapq: 30
+  walks_policy: "mask"                         # mask walk pair-types (5end3 etc)
+  keep_pair_types: ["UU"]                      # uniquely-mapped only
+
+# ---------- cooler ----------
+cooler:
+  bin_sizes_kb: [5, 10, 25, 50, 100, 250, 500, 1000, 2500]
+  oracle_bin_sizes_kb: [5, 25, 100, 1000]      # the 4 ORACLE hierarchy levels
+  balance:
+    ignore_diags: 2
+    min_nnz: 10
+    mad_max: 5
+    cis_only: false
+
+# ---------- MACS2 peak calling (per histone mark) ----------
+macs2:
+  genome_size: "hs"                            # hs | mm | dm | ce
+  marks:
+    H3K4me3:   { mode: "narrow", q: 0.01 }
+    H3K4me1:   { mode: "narrow", q: 0.01 }
+    H3K27ac:   { mode: "narrow", q: 0.01 }
+    H3K27me3:  { mode: "broad",  q: 0.05, broad_cutoff: 0.1 }
+    H3K36me2:  { mode: "broad",  q: 0.05, broad_cutoff: 0.1 }
+    H3K36me3:  { mode: "broad",  q: 0.05, broad_cutoff: 0.1 }
+    CTCF:      { mode: "narrow", q: 0.01 }
+
+# ---------- FitHiChIP loop calling ----------
+fithichip:
+  bin_size: 5000                               # 5 kb
+  lower_distance: 20000                        # 20 kb
+  upper_distance: 3000000                      # 3 Mb
+  fdr_threshold: 0.01
+  background_type: "Coverage_Bias"             # "Peak-to-ALL" recommended; this is the bg model
+  interaction_type: "Peak-to-ALL"
+  min_reads: 6
+
+# ---------- Replicate QC ----------
+hicrep:
+  bin_size: 25000                              # 25 kb is HiCRep's sweet spot
+  max_dist: 5000000                            # 5 Mb stratification
+  h_smooth: 1
+  threshold_pass: 0.85                         # SCC ≥ 0.85 to call replicates concordant
+
+# ---------- APA ----------
+apa:
+  window_size: 20                              # ± 20 bins around loop centre
+  bin_size: 10000
+  min_loop_dist: 100000
+  n_random_controls: 5                         # random-shift controls per loop
+
+# ---------- Differential loops ----------
+differential:
+  fdr: 0.05
+  log2fc_min: 1.0
+  method: "pyDESeq2"                           # pyDESeq2 | diffhic_r
+
+# ---------- Visualisation regions of interest ----------
+# Override per project. These are examples for the ovarian deep-dive.
+viz:
+  regions:
+    - { name: "MYC_locus",   chrom: "chr8",  start: 126500000, end: 129500000 }
+    - { name: "BCL2_locus",  chrom: "chr18", start: 60500000,  end: 63500000 }
+    - { name: "NSD1_locus",  chrom: "chr5",  start: 176000000, end: 177500000 }
+    - { name: "PPARG_locus", chrom: "chr3",  start: 12200000,  end: 12550000 }
+
+# ---------- ORACLE COS export ----------
+oracle_export:
+  output_format: "pyg"                         # pyg | h5
+  emit_bigwigs: true                           # for every mark, per sample
+  blacklist_bed: "resources/hg38-blacklist.v2.bed.gz"
+  microbiome_metadata_tsv: "config/microbiome_tokens.tsv"   # optional; one row per sample
+  drop_chromosomes: ["chrM", "chrY"]

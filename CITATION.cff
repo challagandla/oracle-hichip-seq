@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+title: "ORACLE HiChIP analysis pipeline"
+message: "If you use this pipeline, please cite as below."
+type: software
+authors:
+  - given-names: Anil
+    family-names: Challagandla
+    email: challagandla.anil@gmail.com
+repository-code: ""
+abstract: >-
+  End-to-end Snakemake workflow for HiChIP processing — bwa-mem2 + pairtools
+  alignment, cooler/cooltools matrix building and balancing, MACS2 1D peak
+  calling, FitHiChIP loop calling, HiCRep + APA + insulation QC, differential
+  loop analysis (pyDESeq2), pyGenomeTracks visualisation, and export to the
+  ORACLE Chromatin Operating System graph format (PyTorch Geometric).
+keywords:
+  - HiChIP
+  - Snakemake
+  - cooler
+  - FitHiChIP
+  - 3D chromatin
+  - foundation model
+  - epigenomics
+  - bioinformatics
+license: MIT
+version: 0.1.0
+date-released: 2026-05-29

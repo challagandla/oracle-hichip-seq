@@ -1,0 +1,47 @@
+{
+  "python.defaultInterpreterPath": "${env:CONDA_PREFIX}/envs/oracle-hichip/bin/python",
+  "python.terminal.activateEnvironment": true,
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.diagnosticMode": "workspace",
+
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": { "source.organizeImports": "explicit" }
+  },
+  "black-formatter.args": ["--line-length=100"],
+  "ruff.lint.args": ["--line-length=100"],
+
+  "snakefmt.args": ["--line-length=100"],
+  "snakemake-language-server.snakemake-language-server.executable": "snakemake",
+  "files.associations": {
+    "*.smk": "snakemake",
+    "Snakefile": "snakemake",
+    "*.cool": "binary",
+    "*.mcool": "binary",
+    "*.pairs.gz": "binary",
+    "*.h5": "binary"
+  },
+
+  "jupyter.notebookFileRoot": "${workspaceFolder}",
+  "notebook.formatOnSave.enabled": true,
+
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.snakemake": true,
+    "**/results": false,
+    "**/.pytest_cache": true
+  },
+  "search.exclude": {
+    "results/**/*.cool": true,
+    "results/**/*.mcool": true,
+    "results/**/*.pairs.gz": true,
+    "results/**/*.bam": true,
+    "results/**/*.fastq.gz": true
+  },
+
+  "terminal.integrated.env.linux": { "PYTHONNOUSERSITE": "1" },
+  "terminal.integrated.env.osx":   { "PYTHONNOUSERSITE": "1" },
+  "terminal.integrated.env.windows": { "PYTHONNOUSERSITE": "1" }
+}

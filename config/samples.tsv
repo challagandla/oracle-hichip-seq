@@ -1,0 +1,8 @@
+sample_id	subject_id	tissue	disease	cancer_type	replicate	mark	fastq_r1	fastq_r2	batch	library_protocol	notes
+HCT_OV_001_R1	OV001	tumor	ovarian_HGSOC	ovarian	1	H3K27ac	data/fastq/HCT_OV_001_R1_R1.fastq.gz	data/fastq/HCT_OV_001_R1_R2.fastq.gz	2026Q2_A	HiChIP_v2	"deep-dive cohort"
+HCT_OV_001_R2	OV001	tumor	ovarian_HGSOC	ovarian	2	H3K27ac	data/fastq/HCT_OV_001_R2_R1.fastq.gz	data/fastq/HCT_OV_001_R2_R2.fastq.gz	2026Q2_A	HiChIP_v2	"deep-dive cohort"
+HCT_OV_001_K4M3	OV001	tumor	ovarian_HGSOC	ovarian	1	H3K4me3	data/fastq/HCT_OV_001_K4_R1.fastq.gz	data/fastq/HCT_OV_001_K4_R2.fastq.gz	2026Q2_A	HiChIP_v2	"deep-dive cohort"
+HPP_PBMC_S1234_K4M3	S1234	pbmc	healthy	NA	1	H3K4me3	data/fastq/HPP_PBMC_S1234_K4_R1.fastq.gz	data/fastq/HPP_PBMC_S1234_K4_R2.fastq.gz	2026Q2_B	CUT_Tag_HiChIP	"HPP pilot subject"
+HPP_PBMC_S1234_K27M3	S1234	pbmc	healthy	NA	1	H3K27me3	data/fastq/HPP_PBMC_S1234_K27_R1.fastq.gz	data/fastq/HPP_PBMC_S1234_K27_R2.fastq.gz	2026Q2_B	CUT_Tag_HiChIP	"HPP pilot subject"
+HPP_PBMC_S1234_K36M2	S1234	pbmc	healthy	NA	1	H3K36me2	data/fastq/HPP_PBMC_S1234_K36me2_R1.fastq.gz	data/fastq/HPP_PBMC_S1234_K36me2_R2.fastq.gz	2026Q2_B	CUT_Tag_HiChIP	"HPP pilot subject"
+HPP_PBMC_S1234_K36M3	S1234	pbmc	healthy	NA	1	H3K36me3	data/fastq/HPP_PBMC_S1234_K36me3_R1.fastq.gz	data/fastq/HPP_PBMC_S1234_K36me3_R2.fastq.gz	2026Q2_B	CUT_Tag_HiChIP	"HPP pilot subject"

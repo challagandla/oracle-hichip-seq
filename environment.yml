@@ -1,0 +1,108 @@
+# ORACLE HiChIP analysis environment
+# Build with: mamba env create -f environment.yml -n oracle-hichip
+# Or:        micromamba create -y -f environment.yml -n oracle-hichip
+name: oracle-hichip
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.11
+
+  # ----- Workflow & infra -----
+  - snakemake-minimal=8.*
+  - snakemake-wrapper-utils
+  - pulp                            # snakemake DAG solver dep (pinning prevents CBC bug)
+  - mamba                           # for --use-conda inside snakemake
+  - graphviz                        # for snakemake --dag
+  - jupyterlab                      # exploratory notebooks
+  - ipykernel
+  - black
+  - ruff
+  - mypy
+
+  # ----- Read QC & trim -----
+  - fastqc=0.12.*
+  - fastp=0.23.*
+  - multiqc=1.25.*
+
+  # ----- Alignment & pairs -----
+  - bwa=0.7.*
+  - bwa-mem2=2.2.*                  # 2-3x faster than bwa-mem
+  - samtools=1.20.*
+  - pairtools=1.1.*
+  - htslib=1.20.*
+
+  # ----- Matrix building / cool -----
+  - cooler=0.10.*
+  - cooltools=0.7.*
+  - pairix=0.3.*
+
+  # ----- Peak calling (1D) -----
+  - macs2=2.2.*
+  - bedtools=2.31.*
+  - ucsc-bedclip
+  - ucsc-bedgraphtobigwig
+
+  # ----- HiChIP loop calling -----
+  - fithichip                       # bioconda - peak-to-all loop caller
+  - mustache-hic                    # cross-check loop caller
+  - hicexplorer=3.7.*               # auxiliary (TADs, A/B compartments)
+
+  # ----- Replicate / matrix QC -----
+  - hicreppy=0.1.*                  # python HiCRep stratum-adjusted correlation
+  - pip
+
+  # ----- Differential loops (R side) -----
+  - bioconductor-diffhic
+  - bioconductor-deseq2
+  - bioconductor-edger
+  - bioconductor-genomicinteractions
+  - bioconductor-genomicranges
+  - bioconductor-rtracklayer
+  - r-base=4.4.*
+
+  # ----- Annotation -----
+  - bioconductor-chipseeker
+  - bioconductor-clusterprofiler
+  - bioconductor-org.hs.eg.db
+  - bioconductor-txdb.hsapiens.ucsc.hg38.knowngene
+  - gffread
+  - pyranges=0.1.*                  # used by bedpe_annotate.py
+  - pybigwig=0.3.*                  # used by virtual_4c.py, compartment export
+  - pyfaidx=0.8.*
+
+  # ----- Visualisation -----
+  - pygenometracks=3.9.*
+  - matplotlib=3.9.*
+  - seaborn=0.13.*
+  - bioframe=0.7.*
+  - plotnine
+
+  # ----- Scientific Python -----
+  - numpy=1.26.*                    # pin <2 for cooler/cooltools compat
+  - scipy=1.13.*
+  - pandas=2.2.*
+  - pyarrow
+  - h5py=3.11.*
+  - hdf5=1.14.*
+  - scikit-learn=1.5.*
+  - statsmodels
+  - networkx
+  - intervaltree
+  - tqdm
+
+  # ----- ORACLE COS export (PyTorch Geometric) -----
+  - pytorch::pytorch=2.4.*
+  - pytorch::pytorch-cuda=12.1      # comment out on CPU-only machines
+  - pyg::pyg=2.6.*
+  - pyg::pytorch-scatter
+  - pyg::pytorch-sparse
+  - pyg::pytorch-cluster
+
+  # ----- pip-only -----
+  - pip:
+      - pyDESeq2==0.4.*
+      - higlass-python==1.2.*       # optional interactive viz
+      - clodius                     # higlass tile generation
+      - pairtools-helpers

@@ -1,0 +1,32 @@
+# Genome assemblies + paths. Override paths to your local references.
+# All file paths must exist before snakemake is invoked.
+
+hg38:
+  fasta:       "resources/hg38/GRCh38.primary_assembly.genome.fa"
+  bwa_index:   "resources/hg38/bwa_index/GRCh38.primary_assembly.genome.fa"
+  bwamem2_index: "resources/hg38/bwamem2_index/GRCh38.primary_assembly.genome.fa"
+  chromsizes:  "resources/hg38/hg38.chrom.sizes"
+  gtf:         "resources/hg38/gencode.v46.primary_assembly.annotation.gtf.gz"
+  blacklist:   "resources/hg38/hg38-blacklist.v2.bed.gz"
+  digest_bed:  "resources/hg38/MboI.digest.hg38.bed.gz"     # Arima-HiC: GATC, ^GATC
+  enzyme:      "Arima"                                       # MboI + DpnII; HiChIP standard
+
+T2T-CHM13:
+  fasta:       "resources/t2t/chm13v2.0.fa"
+  bwa_index:   "resources/t2t/bwa_index/chm13v2.0.fa"
+  bwamem2_index: "resources/t2t/bwamem2_index/chm13v2.0.fa"
+  chromsizes:  "resources/t2t/chm13v2.0.chrom.sizes"
+  gtf:         "resources/t2t/chm13v2.0.gtf.gz"
+  blacklist:   "resources/t2t/chm13.blacklist.bed.gz"
+  digest_bed:  "resources/t2t/MboI.digest.chm13.bed.gz"
+  enzyme:      "Arima"
+
+mm10:
+  fasta:       "resources/mm10/mm10.fa"
+  bwa_index:   "resources/mm10/bwa_index/mm10.fa"
+  bwamem2_index: "resources/mm10/bwamem2_index/mm10.fa"
+  chromsizes:  "resources/mm10/mm10.chrom.sizes"
+  gtf:         "resources/mm10/gencode.vM25.annotation.gtf.gz"
+  blacklist:   "resources/mm10/mm10-blacklist.v2.bed.gz"
+  digest_bed:  "resources/mm10/MboI.digest.mm10.bed.gz"
+  enzyme:      "Arima"

@@ -1,0 +1,72 @@
+# Python / VS Code
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.ipynb_checkpoints/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Conda
+.conda/
+# environment.lock.yml IS committed for reproducibility
+
+# Snakemake state
+.snakemake/
+results/
+.snakemake.log
+
+# Raw / derived bioinformatics outputs — never commit
+*.fastq
+*.fastq.gz
+*.bam
+*.bai
+*.sam
+*.cram
+*.cool
+*.mcool
+*.hic
+*.pairs
+*.pairs.gz
+*.pairsam.gz
+*.allValidPairs
+*.bigWig
+*.bw
+*.bedgraph
+*.bdg
+*.h5
+*.pt
+*.npy
+*.npz
+*.pkl
+data/
+resources/
+references/
+fasta/
+fastq/
+
+# Models / checkpoints
+checkpoints/
+runs/
+wandb/
+mlruns/
+*.ckpt
+*.safetensors
+
+# OS / editors
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+*.swp
+*.swo
+
+# Office locks / temp
+~$*
+.~lock.*#
+*.tmp
+
+# Logs
+logs/
+*.log

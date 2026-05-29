@@ -1,0 +1,15 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.sh  text eol=lf
+
+*.svg binary
+*.png binary
+*.pdf binary
+*.h5  binary
+*.cool binary
+*.mcool binary
+*.pt  binary
+
+*.smk linguist-language=Snakemake
+Snakefile linguist-language=Snakemake
