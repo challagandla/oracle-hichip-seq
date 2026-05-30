@@ -1,0 +1,30 @@
+name: static-checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python-and-config-sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile Python helper scripts
+        run: |
+          python -m py_compile $(find workflow/scripts -name '*.py' | sort)
+
+      - name: Confirm expected entrypoints exist
+        run: |
+          test -f Snakefile
+          test -f workflow/Snakefile
+          test -f config/config.yaml
+          test -f config/samples.tsv
+          test -f config/genome.yaml
+
+      - name: Confirm workflow components exist
+        run: |
+          test -f workflow/rules/05_loops_fithichip.smk
+          test -f workflow/rules/07_differential.smk
+          test -f workflow/scripts/export_oracle_cos.py
+          test -f workflow/scripts/cooltools_eigs_cis.py
