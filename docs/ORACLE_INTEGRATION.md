@@ -1,88 +1,63 @@
-# How this pipeline connects to the ORACLE foundation model
+# ORACLE integration contract
 
-The HiChIP pipeline emits one `cos_<sample>.pt` file per sample (PyTorch
-Geometric `HeteroData`) plus a parallel `.h5` mirror. These are the canonical
-inputs to ORACLE's two-tower training code.
+This repository exports HiChIP-derived graph objects for the ORACLE model-development corpus.
 
-## File contract (output of `09_export_oracle`)
+## Outputs
 
-```
-results/oracle_cos/<sample>.pt        # PyG HeteroData (primary)
-results/oracle_cos/<sample>.h5        # HDF5 mirror (debugging / non-PyG consumers)
-results/oracle_cos/<sample>.manifest.json
-results/oracle_cos/intermediates/<sample>.annotated_loops.bedpe
-```
+For each sample:
 
-### HeteroData layout
+- `results/oracle_cos/<sample>.pt` — PyTorch Geometric `HeteroData` graph.
+- `results/oracle_cos/<sample>.h5` — HDF5 mirror for inspection and non-PyG consumers.
+- `results/oracle_cos/<sample>.manifest.json` — machine-readable description of resolutions, node features, edge features and caveats.
 
-```
-data['sample'].id                              # str
-data['sample'].microbiome                      # FloatTensor[K] (may be empty)
+## Resolutions
 
-for bp in [5000, 25000, 100000, 1_000_000]:
-    nt = f'bin_res_{bp}'
-    data[nt].x                                 # FloatTensor[N_bp, C]
-                                               #   C currently = [peak_signal,
-                                               #     insulation, E1] = 3
-                                               #   sister pipelines (atac/, cutandtag/,
-                                               #     medip/, rnaseq/) append channels
-                                               #     during merge in oracle/training/data.py.
-    data[nt].bin_chrom / bin_start / bin_end   # stored in .h5; restored on load if needed
+The graph is emitted at:
 
-    et = (nt, 'contact', nt)
-    data[et].edge_index                        # LongTensor[2, E]
-    data[et].edge_attr                         # FloatTensor[E, 3]
-                                               #   [score, fdr, distance_bp]
-    data[et].edge_kind                         # Int8Tensor[E]
-                                               #   0 = adjacency, 1 = HiChIP loop
-```
+- 5 kb
+- 25 kb
+- 100 kb
+- 1 Mb
 
-### Where additional modality channels come in
+These are configured by `cooler.oracle_bin_sizes_kb` in `config/config.yaml`.
 
-| Channel | Produced by | Merged where |
-|---|---|---|
-| `peak_signal` (HiChIP anchor peaks) | this pipeline | export_oracle_cos.py |
-| H3K4me3 / K27me3 / K36me2 / K36me3 CUT&Tag bigWig sums per bin | `code/cutandtag/` | `oracle/training/data.py` |
-| ATAC accessibility | `code/atac/` | `oracle/training/data.py` |
-| MeDIP CpG methylation | `code/medip/` | `oracle/training/data.py` |
-| RNA expression (bin–gene aware) | `code/rnaseq/` | `oracle/training/data.py` |
-| WGS SVs → edge rewiring | `code/wgs_sv/` | `oracle/training/data.py` (differentiable rewire layer) |
-| Microbiome tokens | `config/microbiome_tokens.tsv` here | this pipeline writes `data['sample'].microbiome` directly |
+## Current node features
 
-## Training-side loader (illustrative — lives in `oracle/training/data.py`)
+The current HiChIP-only export contains:
 
-```python
-import torch
-from torch_geometric.data import HeteroData
+1. `peak_overlap_count_per_kb` — MACS2 peak-overlap count normalised by bin length.
+2. `insulation` — cooltools insulation score.
+3. `E1_eigenvector` — A/B compartment eigenvector.
 
-def load_sample(path: str) -> HeteroData:
-    return torch.load(path, weights_only=False)
+Important: `peak_overlap_count_per_kb` is a prototype feature, not continuous per-mark ChIP/CUT&Tag signal. Full ORACLE COS should merge continuous signal channels from sister ATAC/CUT&Tag/methylation/RNA pipelines.
 
-# Merge in other modalities (called once per epoch or pre-baked):
-def attach_external_channels(data: HeteroData, sample_id: str,
-                             cutandtag_h5: str, atac_h5: str,
-                             medip_h5: str, rna_h5: str,
-                             wgs_sv_h5: str) -> HeteroData:
-    ...
-    # Concatenate new channels onto data[node_type].x and append
-    # SV-induced edges to data[(...,'contact',...)].edge_index.
-    return data
-```
+## Current edge features
 
-## Cross-pipeline conventions
+Edges include:
 
-- **Bin coordinates are inclusive-exclusive [start, end)**, always at the
-  resolutions 5 kb / 25 kb / 100 kb / 1 Mb. Never bin to other sizes downstream.
-- **Genome assembly is recorded in the manifest.** Mixing hg38 and T2T-CHM13
-  channels in the same `HeteroData` is a hard error.
-- **Blacklisted bins are masked (not removed).** Mask flag is stored in the
-  sister pipelines' channel exports as an extra "is_blacklist" feature.
-- **Channels are z-scored per-modality within a batch** during training
-  (not here) — this pipeline emits raw per-bin signal.
+- genomic adjacency edges
+- FitHiChIP loop/contact edges
 
-## QC gate before a sample enters training
+Loop edge attributes:
 
-A sample's `.pt` is only consumed by training if its
-`results/qc/loop_qc/<sample>.json` carries `overall_pass: true`. The
-ORACLE training script (`oracle/training/build_dataset.py`) reads the QC
-JSONs and discards failing samples with a logged reason.
+1. `loop_score`
+2. `loop_fdr`
+3. `genomic_distance_bp`
+
+## QC contract
+
+Each sample has a QC JSON at:
+
+`results/qc/loop_qc/<sample>.json`
+
+Replicate QC is three-state:
+
+- `PASS`
+- `FAIL`
+- `NOT_ASSESSED`
+
+Single-replicate samples should not be interpreted as replicate-validated.
+
+## Differential analysis contract
+
+Differential loops must be configured explicitly and stratified by mark/tissue/protocol. The pipeline intentionally leaves `differential.comparisons` empty in the template to avoid invalid default comparisons.

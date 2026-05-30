@@ -1,6 +1,6 @@
 # ORACLE HiChIP analysis pipeline
 
-End-to-end HiChIP processing — paired-end FASTQ in, ORACLE-ready Chromatin Operating System (COS) graphs out, with comprehensive QC and publication-grade visualisation at every stage.
+End-to-end HiChIP processing — paired-end FASTQ in, ORACLE-ready Chromatin Operating System (COS) graph prototypes out, with comprehensive QC and publication-grade visualisation at every stage.
 
 > Component of the **ORACLE** research program (Onco-Regulatory Architecture and Chromatin Latent Engine). The proposal and foundation-model training code live in separate repositories.
 
@@ -8,93 +8,85 @@ End-to-end HiChIP processing — paired-end FASTQ in, ORACLE-ready Chromatin Ope
 
 | Choice | What we use | Why |
 |---|---|---|
-| Workflow manager | **Snakemake 8.x** | Native Python, deterministic DAGs, trivial to step through in VS Code, easy to extend per-sample. |
-| Environment | **mamba / micromamba + conda-forge + bioconda** | Solver 10–20× faster than vanilla conda; reproducible `environment.yml`. |
-| Alignment + pairs | **`bwa-mem2 -SP5M` + `pairtools` (Open2C)** | Modern standard, replaces legacy HiC-Pro; outputs `.pairs.gz` consumable by `cooler`. |
+| Workflow manager | **Snakemake 8.x** | Native Python, deterministic DAGs, easy to inspect and extend. |
+| Environment | **mamba / micromamba + conda-forge + bioconda + pytorch/nvidia/pyg** | Reproducible `environment.yml`; explicit GPU channels for PyTorch/PyG. |
+| Alignment + pairs | **`bwa-mem2 -SP5M` + `pairtools` (Open2C)** | Modern HiC/HiChIP standard, replaces legacy HiC-Pro; emits `.pairs.gz` consumable by `cooler`. |
 | Storage | **`.cool` / `.mcool` (cooler)** | Compressed, HDF5-backed, multi-resolution. Generates `.hic` only on demand for Juicebox. |
-| Loop calling | **FitHiChIP `Peak-to-ALL`** | Gold standard for peak-anchored HiChIP; correctly models the 1D ChIP bias. Mustache used as cross-check. |
-| Peak calling | **MACS2** (narrow for K27ac/K4me3, broad for K27me3/K36me2/me3) | Standard; outputs feed FitHiChIP anchors. |
-| Replicate QC | **HiCRep (`hicreppy`)** | Stratum-adjusted correlation — only metric robust to distance decay. |
-| QC suite | **`cooltools` + `pairtools stats` + `MultiQC`** | Cis/trans, distance-decay, P(s), insulation. |
-| Normalisation | **ICE (cooler balance) + KR** | ICE for matrices; loops use FitHiChIP spline correction internally. |
-| Differential loops | **`pyDESeq2`** on per-loop counts (alt: `diffHic` R) | Mature framework with optional R fallback. |
-| Visualisation | **`pyGenomeTracks` + cooltools APA + HiGlass (optional)** | Publication-grade static; interactive browsing for collaborators. |
-| ORACLE export | Custom — multi-resolution graph + node features → `.h5` / PyTorch Geometric `.pt` | Feeds directly into the ORACLE foundation-model training corpus. |
-| IDE | **VS Code** with Snakemake, Python, Jupyter, Pylance extensions | See `.vscode/extensions.json`. |
+| Loop calling | **FitHiChIP `Peak-to-ALL`** | Peak-anchored HiChIP loop caller; models 1D ChIP bias. Mustache used as cross-check. |
+| Peak calling | **MACS2** | Narrow peaks for K27ac/K4me3/CTCF; broad peaks for K27me3/K36me2/K36me3. |
+| Replicate QC | **HiCRep (`hicreppy`)** | Stratum-adjusted correlation robust to distance decay. Missing replicate comparisons are now reported as `NOT_ASSESSED`, not true PASS. |
+| QC suite | **`cooltools` + `pairtools stats` + `MultiQC`** | Cis/trans, distance-decay, P(s), insulation, compartments, APA. |
+| Differential loops | **`pyDESeq2`** on per-loop counts | Comparison definitions are explicit and guarded against mixing marks/tissues/protocols. |
+| Visualisation | **`pyGenomeTracks` + cooltools APA + HiGlass optional** | Publication-grade static figures; interactive browsing for collaborators. |
+| ORACLE export | Custom — multi-resolution graph + prototype node features → `.h5` / PyTorch Geometric `.pt` | Feeds directly into the ORACLE model-development corpus. Current node signal is peak-overlap prototype; true continuous per-mark tracks should be merged later from sister modality pipelines. |
 
 ## Layout
 
 ```
 oracle-hichip/
-├── README.md                       # this file
-├── LICENSE                         # MIT
-├── CITATION.cff
-├── .gitignore, .gitattributes
-├── environment.yml                 # conda/mamba env
-├── setup_env.sh                    # one-command install
+├── Snakefile                         # root wrapper → workflow/Snakefile
+├── README.md, LICENSE, CITATION.cff
+├── environment.yml, setup_env.sh
 ├── config/
-│   ├── config.yaml                 # pipeline parameters
-│   ├── samples.tsv                 # sample sheet (one row per sample)
-│   └── genome.yaml                 # genome assemblies + paths
+│   ├── config.yaml                   # pipeline parameters
+│   ├── samples.tsv                   # one row per sample
+│   └── genome.yaml                   # genome assemblies + paths
 ├── workflow/
-│   ├── Snakefile                   # main entry point
+│   ├── Snakefile                     # main entry point
 │   ├── rules/
-│   │   ├── 01_qc_raw.smk           # FastQC + fastp adapter trim
-│   │   ├── 02_align_pairs.smk      # bwa-mem2 + pairtools parse/sort/dedup
-│   │   ├── 03_cool_matrix.smk      # cooler cload + zoomify + balance (ICE)
-│   │   ├── 04_peaks.smk            # MACS2 from 1D reads
-│   │   ├── 05_loops_fithichip.smk  # pairs→validpairs + FitHiChIP + mustache
-│   │   ├── 06_loop_qc.smk          # cis/trans, P(s), insulation, eigs, APA, HiCRep
-│   │   ├── 07_differential.smk     # union loops + pyDESeq2 differential
-│   │   ├── 08_viz.smk              # pyGenomeTracks + virtual 4C
-│   │   ├── 09_export_oracle.smk    # COS graph + node features → ORACLE
-│   │   └── 10_multiqc.smk          # aggregate HTML report
-│   └── scripts/                    # Python: HiCRep, APA, loop QC, BEDPE annotate,
-│                                   # differential loops, pyGenomeTracks, virtual 4C,
-│                                   # ORACLE COS exporter, utils, etc.
-├── .vscode/                        # VS Code settings + recommended extensions
+│   │   ├── 01_qc_raw.smk
+│   │   ├── 02_align_pairs.smk
+│   │   ├── 03_cool_matrix.smk
+│   │   ├── 04_peaks.smk
+│   │   ├── 05_loops_fithichip.smk
+│   │   ├── 06_loop_qc.smk
+│   │   ├── 07_differential.smk
+│   │   ├── 08_viz.smk
+│   │   ├── 09_export_oracle.smk
+│   │   └── 10_multiqc.smk
+│   └── scripts/
+│       ├── cooltools_eigs_cis.py
+│       ├── bedpe_annotate.py
+│       ├── export_oracle_cos.py
+│       ├── differential_loops.py
+│       └── ...
 └── docs/
-    ├── BEST_PRACTICES.md           # 46-item analysis checklist
-    └── ORACLE_INTEGRATION.md       # contract with the ORACLE foundation model
+    ├── BEST_PRACTICES.md
+    └── ORACLE_INTEGRATION.md
 ```
 
 ## Install
 
 ```bash
-# install micromamba (fastest) — skip if you have mamba/conda already
-curl -L micro.mamba.pm/install.sh | bash
-
-# build the env
-mamba env create -f environment.yml -n oracle-hichip
+bash setup_env.sh
 mamba activate oracle-hichip
-
-# verify
-snakemake --version && cooler --version && pairtools --version && macs2 --version
 ```
+
+For CPU-only machines, remove `pytorch-cuda` from `environment.yml` or maintain a separate CPU environment file.
 
 ## Run
 
 ```bash
 mamba activate oracle-hichip
 
-# dry run to inspect the DAG
-snakemake -n --configfile config/config.yaml
+# Dry run / inspect DAG from repository root
+snakemake -s workflow/Snakefile -n --configfile config/config.yaml
 
-# full run, 32 cores
-snakemake --cores 32 --configfile config/config.yaml --use-conda
+# Full run, 32 cores
+snakemake -s workflow/Snakefile --cores 32 --configfile config/config.yaml --use-conda
 
-# on a SLURM cluster (provide your own profile)
-snakemake --profile profiles/slurm --configfile config/config.yaml
+# On a SLURM cluster, provide your own profile
+snakemake -s workflow/Snakefile --profile profiles/slurm --configfile config/config.yaml
 ```
 
-Convenience phony targets:
+Convenience targets:
 
 ```bash
-snakemake --cores 16 qc_raw
-snakemake --cores 32 align_pairs
-snakemake --cores 32 loops_fithichip
-snakemake --cores 16 export_oracle
-snakemake --cores 4  multiqc
+snakemake -s workflow/Snakefile --cores 16 qc_raw --configfile config/config.yaml
+snakemake -s workflow/Snakefile --cores 32 align_pairs --configfile config/config.yaml
+snakemake -s workflow/Snakefile --cores 32 loops_fithichip --configfile config/config.yaml
+snakemake -s workflow/Snakefile --cores 16 export_oracle --configfile config/config.yaml
+snakemake -s workflow/Snakefile --cores 4  multiqc --configfile config/config.yaml
 ```
 
 ## Crucial steps and rationale
@@ -103,48 +95,55 @@ snakemake --cores 4  multiqc
 FastQC + `fastp` adapter/quality trim. HiChIP libraries often carry adapter readthrough on short fragments; untrimmed reads inflate junk pairs and depress valid-pair yield. Target ≥ Q20 and ≥ 70% retained after trim.
 
 ### 2. Align with bwa-mem2 `-SP5M`
-`-SP5M` is the canonical HiC/HiChIP mode (skip mate rescue, soft-clip 5′ supplementary, mark short hits as secondary). pairtools parses the alignment into a `.pairs.gz` file with the four-letter pair type code. **Only `UU` pairs are uniquely-mapped and trustworthy.**
+`-SP5M` is the canonical HiC/HiChIP mode. Read IDs are now retained in pairtools output so the downstream FitHiChIP validPairs conversion has a valid first column. Only `UU` pairs are retained for loop/matrix work.
 
-### 3. Dedup with `pairtools dedup` (NOT Picard)
-HiC duplicates need to be defined on the pair (read1 position, read2 position) not on either read alone. Picard MarkDuplicates undercounts or overcounts. Expect 10–40% duplicate rate; > 50% indicates undersampled library.
+### 3. Dedup with `pairtools dedup`, not Picard
+HiC duplicates need to be defined on the pair, not either read alone. Expect 10–40% duplicate rate; >50% indicates an undersampled library.
 
-### 4. Build `.cool` + `.mcool` at the standard resolutions
-We balance at 5 / 10 / 25 / 50 / 100 / 250 / 500 kb / 1 / 2.5 Mb. ORACLE consumes 5 kb / 25 kb / 100 kb / 1 Mb as the four hierarchy levels.
+### 4. Build `.cool` + `.mcool` at standard resolutions
+The pipeline balances 5 / 10 / 25 / 50 / 100 / 250 / 500 kb / 1 / 2.5 Mb. ORACLE consumes 5 kb / 25 kb / 100 kb / 1 Mb.
 
-### 5. Call 1D peaks on the same reads (MACS2)
-HiChIP loop calling needs ChIP anchors. We extract single-end reads from the deduped UU pairsam (`pairtools split`) and run MACS2:
-- H3K27ac / H3K4me3 / H3K4me1 / CTCF → **narrowPeak** (q < 0.01)
-- H3K27me3 / H3K36me2 / H3K36me3 → **broadPeak** (q < 0.05)
+### 5. Call 1D peaks on the same reads
+HiChIP loop calling needs ChIP anchors. MACS2 mode is chosen per mark in `config/config.yaml`.
 
-### 6. Loop calling — FitHiChIP (Peak-to-ALL)
-At 5 kb bin size, FDR < 0.01, ≥ 6 reads per loop, 20 kb–3 Mb distance range. Always report loops at each resolution separately — collapsing across resolutions inflates FDR.
+### 6. Loop calling — FitHiChIP
+FitHiChIP receives a validPairs file generated from pairtools `.pairs.gz` with read IDs preserved. FitHiChIP numeric settings are explicit in `config.yaml`, so changing thresholds does not silently desynchronise the expected output path.
 
 ### 7. QC the loops
-- **Cis/trans ratio** ≥ 70% cis.
-- **Reads in loops** ≥ 10% of valid intra-chromosomal pairs.
-- **Distance decay P(s)** should follow the expected −1 slope on log–log.
-- **APA score** ≥ 1.5 at high-confidence loops vs. random shifts.
-- **HiCRep stratum-adjusted correlation** between biological replicates ≥ 0.85.
+- Cis/trans ratio ≥ 70% cis.
+- Reads in loops ≥ 10% of valid intra-chromosomal pairs.
+- P(s) should show expected distance decay.
+- APA score ≥ 1.5 at high-confidence loops vs random shifts.
+- HiCRep SCC ≥ 0.85 where biological replicates exist.
+- Single-replicate HiCRep is reported as `NOT_ASSESSED`, not pass.
 
 ### 8. Differential loops
-Union loop set across samples, count per-loop per sample with `cooler.matrix(...).fetch`, run `pyDESeq2` with FDR < 0.05 and |log2FC| ≥ 1.
+Differential analysis is disabled by default until matched, same-mark case/control groups are defined in `config.yaml`. This prevents accidental comparisons such as tumor H3K27ac versus healthy PBMC H3K36me2.
+
+Example:
+
+```yaml
+differential:
+  comparisons:
+    - name: ovarian_tumor_vs_adjacent_H3K27ac
+      mark: H3K27ac
+      case_filter:    { tissue: tumor, disease: ovarian_HGSOC, library_protocol: HiChIP_v2 }
+      control_filter: { tissue: adjacent_normal, disease: non_cancer, library_protocol: HiChIP_v2 }
+```
 
 ### 9. Visualisation
 - `pyGenomeTracks` for arc + heatmap composite figures.
-- Aggregate Peak Analysis (APA) for loop strength.
+- APA for aggregate loop strength.
 - Virtual 4C from anchor of interest.
-- Optional: HiGlass server for interactive sharing.
 
 ### 10. Export to ORACLE COS format
-Per sample we emit:
-- `cos_<sample>.h5` — node features (signal per bin) + edge list (loops, adjacency) at four resolutions.
-- `cos_<sample>.pt` — PyTorch Geometric `HeteroData` covering 5 kb / 25 kb / 100 kb / 1 Mb resolutions.
+Per sample the exporter emits:
 
-The exporter in `workflow/scripts/export_oracle_cos.py` is the contract between this pipeline and the ORACLE foundation model. See `docs/ORACLE_INTEGRATION.md`.
+- `cos_<sample>.h5` equivalent at `results/oracle_cos/<sample>.h5`
+- PyTorch Geometric graph at `results/oracle_cos/<sample>.pt`
+- manifest JSON describing feature channels and limitations
 
-## Best practices
-
-See [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md) — a 46-item checklist covering library design, alignment, dedup, matrix balance, peak/loop calling, replicate concordance, differential analysis, visualisation, and reproducibility.
+Current node features are `peak_overlap_count_per_kb`, insulation and E1 eigenvector. Treat this as a structural/peak prototype, not the final full multimodal COS.
 
 ## License
 

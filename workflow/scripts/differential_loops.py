@@ -1,11 +1,13 @@
 """
-Differential loop analysis between cases (e.g. tumor) and controls (e.g. healthy).
+Differential loop analysis between explicitly configured case/control groups.
 
-Default: pyDESeq2 on the loop-by-sample count matrix.
-Alternative: invoke diffHic via Rscript (requires bioconductor-diffhic installed).
+Default: pyDESeq2 on the loop-by-sample count matrix. The Snakemake rule guards
+comparison definition so groups are mark/tissue/protocol compatible before this
+script is called.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -23,10 +25,14 @@ def _load_count_table(files: list[str]) -> tuple[pd.DataFrame, list[str]]:
     sample_order: list[str] = []
     for f in files:
         df = pd.read_csv(f, sep="\t")
+        if df.empty:
+            continue
         sid = df["sample"].iloc[0]
         sample_order.append(sid)
         key = df[["chrom1", "start1", "end1", "chrom2", "start2", "end2"]].astype(str).agg("_".join, axis=1)
         frames.append(pd.Series(df["count"].values, index=key, name=sid))
+    if not frames:
+        raise RuntimeError("No loop-count tables contained data")
     M = pd.concat(frames, axis=1).fillna(0).astype(int)
     return M, sample_order
 
@@ -39,6 +45,8 @@ def _pydeseq2(M: pd.DataFrame, cases: list[str], controls: list[str], fdr: float
         {"condition": ["case" if s in cases else "control" for s in M.columns]},
         index=M.columns,
     )
+    if metadata["condition"].nunique() != 2:
+        raise RuntimeError("Differential loop analysis requires both case and control samples in the count matrix")
     counts = M.T  # samples in rows for pyDESeq2
     dds = DeseqDataSet(counts=counts, metadata=metadata, design_factors="condition", quiet=True)
     dds.deseq2()
@@ -58,11 +66,13 @@ def _volcano(res: pd.DataFrame, out_png: str | Path, fdr: float, lfc: float) -> 
     ax.scatter(x[sig & (x > 0)], y[sig & (x > 0)], s=6, c="#c0392b", label=f"up (n={int((sig & (x>0)).sum())})")
     ax.scatter(x[sig & (x < 0)], y[sig & (x < 0)], s=6, c="#1f5fbf", label=f"down (n={int((sig & (x<0)).sum())})")
     ax.axhline(-np.log10(fdr), c="k", ls="--", lw=0.5)
-    ax.axvline( lfc, c="k", ls="--", lw=0.5); ax.axvline(-lfc, c="k", ls="--", lw=0.5)
+    ax.axvline(lfc, c="k", ls="--", lw=0.5)
+    ax.axvline(-lfc, c="k", ls="--", lw=0.5)
     ax.set_xlabel("log2 fold change (case / control)")
     ax.set_ylabel("-log10 adjusted p")
     ax.legend(loc="upper left", fontsize=8)
     fig.tight_layout()
+    Path(out_png).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_png, dpi=150)
 
 
@@ -71,8 +81,11 @@ def _ma(res: pd.DataFrame, out_png: str | Path) -> None:
     base = np.log10(res["baseMean"].replace(0, np.nextafter(0, 1)))
     ax.scatter(base, res["log2FoldChange"], s=4, c=np.where(res["sig"], "#c0392b", "#bbb"), alpha=0.6)
     ax.axhline(0, c="k", lw=0.5)
-    ax.set_xlabel("log10(base mean)"); ax.set_ylabel("log2 FC")
-    fig.tight_layout(); fig.savefig(out_png, dpi=150)
+    ax.set_xlabel("log10(base mean)")
+    ax.set_ylabel("log2 FC")
+    fig.tight_layout()
+    Path(out_png).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_png, dpi=150)
 
 
 def main(snakemake) -> None:  # type: ignore[no-untyped-def]
@@ -81,10 +94,19 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     method = snakemake.params.method
     fdr = float(snakemake.params.fdr)
     lfc = float(snakemake.params.log2fc_min)
-    cases = list(snakemake.params.cases)
-    controls = list(snakemake.params.controls)
+    cases, controls, comp = snakemake.params.groups
+    cases = list(cases)
+    controls = list(controls)
+    comp = dict(comp)
+
+    if not cases or not controls:
+        raise RuntimeError(f"Comparison {snakemake.wildcards.comparison} has empty case/control groups")
 
     M, order = _load_count_table(list(snakemake.input.counts))
+    missing_cases = sorted(set(cases) - set(M.columns))
+    missing_controls = sorted(set(controls) - set(M.columns))
+    if missing_cases or missing_controls:
+        raise RuntimeError(f"Missing loop-count columns: cases={missing_cases}; controls={missing_controls}")
 
     if method == "pyDESeq2":
         res = _pydeseq2(M, cases, controls, fdr=fdr, lfc=lfc)
@@ -93,15 +115,17 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     else:
         raise ValueError(f"Unknown differential method {method!r}")
 
-    # Decorate result with loop coordinates
     loop_keys = M.index.str.split("_", expand=True)
     res = res.reset_index().rename(columns={"index": "loop_key"})
     coords = pd.DataFrame(loop_keys.tolist(),
                           columns=["chrom1", "start1", "end1", "chrom2", "start2", "end2"],
                           index=M.index)
     res = res.join(coords, on="loop_key").sort_values("padj")
+    Path(snakemake.output.tsv).parent.mkdir(parents=True, exist_ok=True)
     res.to_csv(snakemake.output.tsv, sep="\t", index=False)
 
+    design = {"comparison": snakemake.wildcards.comparison, "cases": cases, "controls": controls, "config": comp}
+    Path(snakemake.output.design).write_text(json.dumps(design, indent=2))
     _volcano(res, snakemake.output.volcano, fdr=fdr, lfc=lfc)
     _ma(res, snakemake.output.ma)
 

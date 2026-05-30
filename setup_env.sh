@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # ORACLE HiChIP — one-command environment setup
-# Run from code/hichip/ directory.
 set -euo pipefail
 
 ENV_NAME="${ENV_NAME:-oracle-hichip}"
 
-echo "==> Building conda environment '${ENV_NAME}' with mamba ..."
+echo "==> Building conda environment '${ENV_NAME}' with mamba/micromamba ..."
 if command -v mamba >/dev/null 2>&1; then
     SOLVER=mamba
 elif command -v micromamba >/dev/null 2>&1; then
@@ -19,18 +18,16 @@ fi
 $SOLVER env create -y -f environment.yml -n "${ENV_NAME}" || \
     $SOLVER env update -y -f environment.yml -n "${ENV_NAME}"
 
-# Lock the env for reproducibility
 echo "==> Locking environment to environment.lock.yml ..."
 $SOLVER env export -n "${ENV_NAME}" --no-builds > environment.lock.yml
 
-# Activate hint
 cat <<'EOF'
 
 ==> Done.
 
 Activate with:
     mamba activate oracle-hichip
-or
+or:
     micromamba activate oracle-hichip
 
 Verify install:
@@ -38,10 +35,10 @@ Verify install:
     cooler --version
     pairtools --version
     macs2 --version
-    fithichip --help | head -5
+    FitHiChIP_HiCPro.sh -h | head -5 || fithichip --help | head -5
 
-Run pipeline:
-    snakemake -n --configfile config/config.yaml   # dry run / DAG
-    snakemake --cores 32 --configfile config/config.yaml
+Run from repository root:
+    snakemake -s workflow/Snakefile -n --configfile config/config.yaml
+    snakemake -s workflow/Snakefile --cores 32 --configfile config/config.yaml --use-conda
 
 EOF

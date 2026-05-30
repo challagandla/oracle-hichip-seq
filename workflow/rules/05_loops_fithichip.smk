@@ -1,16 +1,9 @@
-# Stage 05 — FitHiChIP loop calling (Peak-to-ALL)
-# FitHiChIP is the gold standard for HiChIP loops; it correctly models the
-# 1D ChIP bias via a spline regression. Run per-sample at 5 kb bin size.
-#
-# Note on input format:
-#   FitHiChIP historically consumes the HiC-Pro `.allValidPairs` TSV. We
-#   convert from pairtools .pairs.gz with rule `pairs_to_validpairs` below.
-#   The conversion drops header lines and reorders columns to the HiC-Pro
-#   schema: read_id, chr1, pos1, strand1, chr2, pos2, strand2, frag_size,
-#           valid_type, frag1, frag2
+# Stage 05 — FitHiChIP loop calling (Peak-to-ALL by default)
+# FitHiChIP correctly models 1D ChIP bias via spline regression. Run per-sample
+# at the configured bin size.
 
 rule pairs_to_validpairs:
-    """Convert pairtools .pairs.gz to HiC-Pro .allValidPairs format for FitHiChIP."""
+    """Convert pairtools .pairs.gz to HiC-Pro-style .allValidPairs for FitHiChIP."""
     input:
         pairs = RESULTS / "pairs/{sample}.dedup.pairs.gz"
     output:
@@ -19,18 +12,19 @@ rule pairs_to_validpairs:
         RESULTS / "logs/pairs_to_validpairs/{sample}.log"
     shell:
         r"""
-        # Strip pairtools header (starts with #), then emit HiC-Pro 7-col validpairs:
-        #   id  chr1  pos1  strand1  chr2  pos2  strand2  (FitHiChIP only needs first 7)
+        # pairtools .pairs columns with read IDs retained are:
+        # readID chrom1 pos1 chrom2 pos2 strand1 strand2 pair_type ...
+        # FitHiChIP needs the first seven HiC-Pro-like validPairs columns:
+        # readID chr1 pos1 strand1 chr2 pos2 strand2
         zcat {input.pairs} | awk 'BEGIN{{OFS="\t"}} \
             !/^#/ {{ print $1, $2, $3, $6, $4, $5, $7 }}' \
             > {output.vpairs} 2> {log}
         """
 
-
 rule fithichip_config:
     """
-    Build a per-sample FitHiChIP config text file. FitHiChIP requires a
-    self-contained INI-like config; we templatise it from snakemake.
+    Build a per-sample FitHiChIP config text file. FitHiChIP uses historical
+    numeric codes, so those are explicit in config.yaml and written here.
     """
     input:
         pairs = RESULTS / "pairs/{sample}.allValidPairs",
@@ -43,19 +37,23 @@ rule fithichip_config:
         lower = config["fithichip"]["lower_distance"],
         upper = config["fithichip"]["upper_distance"],
         fdr   = config["fithichip"]["fdr_threshold"],
-        itype = config["fithichip"]["interaction_type"],
-        bgtype = config["fithichip"]["background_type"],
+        int_code = config["fithichip"]["int_type_code"],
+        bias_code = config["fithichip"]["bias_type_code"],
+        use_p2p = config["fithichip"].get("use_p2p_background", 1),
+        itype = config["fithichip"].get("interaction_type", "Peak-to-ALL"),
+        bgtype = config["fithichip"].get("background_type", "Coverage_Bias"),
         outdir = lambda wc: RESULTS / f"loops/{wc.sample}"
     run:
         outdir = Path(params.outdir)
         outdir.mkdir(parents=True, exist_ok=True)
         text = f"""
 # Auto-generated FitHiChIP config for sample {wildcards.sample}
+# interaction_type={params.itype}; background_type={params.bgtype}
 ValidPairs={input.pairs}
 PeakFile={input.peaks}
 ChrSizeFile={input.chromsizes}
 OutDir={outdir}/
-IntType=3                       # Peak-to-ALL
+IntType={params.int_code}
 BINSIZE={params.bin_size}
 LowDistThr={params.lower}
 UppDistThr={params.upper}
@@ -65,30 +63,36 @@ PREFIX={wildcards.sample}
 Draw=1
 TimeProf=1
 OverWrite=1
-UseP2PBackgrnd=1
-BiasType=1                       # coverage bias correction (recommended)
+UseP2PBackgrnd={params.use_p2p}
+BiasType={params.bias_code}
 """.lstrip()
         Path(output.cfg).write_text(text)
 
-
 rule fithichip_run:
     """
-    Run FitHiChIP. Produces the canonical interactions BED at the
-    configured FDR threshold.
+    Run FitHiChIP. Produces the canonical interactions BED at the configured
+    FDR threshold.
     """
     input:
         cfg = RESULTS / "loops/{sample}/fithichip.config"
     output:
-        loops = RESULTS / "loops/{sample}/{sample}.interactions_FitHiC_Q0.01.bed"
+        loops = RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed"
     threads: config["threads"]["fithichip"]
     log:
         RESULTS / "logs/fithichip/{sample}.log"
+    params:
+        q_label = FITHICHIP_Q_LABEL
     shell:
         r"""
-        # FitHiChIP_HiCPro.sh is the runnable script shipped by the bioconda package
         FitHiChIP_HiCPro.sh -C {input.cfg} 2> {log}
+        # Normalise output name in case a FitHiChIP version emits an equivalent
+        # filename with slightly different path nesting.
+        if [ ! -s {output.loops} ]; then
+            found=$(find $(dirname {output.loops}) -type f -name "*interactions_FitHiC_{params.q_label}.bed" | head -n 1)
+            if [ -n "$found" ]; then cp "$found" {output.loops}; fi
+        fi
+        test -s {output.loops}
         """
-
 
 rule mustache_crosscheck:
     """

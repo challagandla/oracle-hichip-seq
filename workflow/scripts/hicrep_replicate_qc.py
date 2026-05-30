@@ -1,9 +1,8 @@
 """
 Stratum-adjusted Pearson correlation (HiCRep) between biological replicates.
-HiCRep is the only matrix similarity metric robust to distance decay differences.
 
-Inputs (from snakemake.input.mcools): one or more .mcool files for the same
-subject + mark. Outputs (snakemake.output.json): per-pair SCC values.
+Outputs a three-state QC result: PASS, FAIL, or NOT_ASSESSED. Single-replicate
+samples are not treated as true passes.
 """
 from __future__ import annotations
 
@@ -35,12 +34,13 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         "n_replicates": len(mcools),
         "pairwise_scc": [],
         "mean_scc": None,
-        "pass": False,
+        "threshold": threshold,
+        "status": "NOT_ASSESSED",
+        "pass": None,
     }
 
     if len(mcools) < 2:
-        # Single sample — no pairwise computation. Emit a placeholder.
-        result["note"] = "Only one replicate; HiCRep skipped."
+        result["note"] = "Only one replicate; HiCRep was not assessed."
         write_json(result, snakemake.output.json)
         return
 
@@ -49,17 +49,14 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         cool_a, _ = readMcool(a, bin_sz)
         cool_b, _ = readMcool(b, bin_sz)
         scc = hicrepSCC(cool_a, cool_b, h, max_dist, bin_sz)
-        # hicrepSCC returns per-chromosome; mean across autosomes
         mean_scc = float(np.nanmean([v for k, v in scc.items() if "X" not in k and "Y" not in k]))
-        result["pairwise_scc"].append({
-            "a": Path(a).stem, "b": Path(b).stem, "scc": mean_scc
-        })
+        result["pairwise_scc"].append({"a": Path(a).stem, "b": Path(b).stem, "scc": mean_scc})
         sccs.append(mean_scc)
 
     result["mean_scc"] = float(np.mean(sccs))
     result["pass"] = result["mean_scc"] >= threshold
+    result["status"] = "PASS" if result["pass"] else "FAIL"
     write_json(result, snakemake.output.json)
 
 
-# Snakemake hands the `snakemake` object via global
 main(snakemake)  # type: ignore[name-defined]  # noqa: F821

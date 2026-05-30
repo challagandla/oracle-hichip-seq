@@ -1,13 +1,12 @@
 # Stage 09 — Export to ORACLE Chromatin Operating System (COS) format
 # Per sample, build a multi-resolution graph at 5 kb / 25 kb / 100 kb / 1 Mb
-# with per-bin node features (signal of each measured mark), loop edges, and
-# global tokens (metadata, optional microbiome). Saved as PyTorch Geometric
-# HeteroData (.pt) — directly consumable by oracle/training/pretrain_*.py.
+# with per-bin prototype node features, loop edges, and global tokens. Saved as
+# PyTorch Geometric HeteroData (.pt) and mirrored to HDF5.
 
 rule annotate_loops:
-    """Annotate loop anchors with peak overlap, nearest genes, and CTCF sites."""
+    """Annotate loop anchors with peak overlap and nearest genes."""
     input:
-        loops = RESULTS / "loops/{sample}/{sample}.interactions_FitHiC_Q0.01.bed",
+        loops = RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed",
         peaks = RESULTS / "peaks/{sample}_peaks.bed",
         gtf   = GENOME["gtf"]
     output:
@@ -23,9 +22,8 @@ rule export_oracle_cos:
     """
     Produce the canonical ORACLE input for a sample:
         - .pt    PyTorch Geometric HeteroData with node + edge attributes
-                 at 4 resolutions
-        - .h5    HDF5 mirror (for non-PyG consumers; ablation; debugging)
-        - bigwig signal tracks per mark
+        - .h5    HDF5 mirror for ablation/debugging
+        - manifest JSON describing channels and limitations
     """
     input:
         mcool = RESULTS / "cool/{sample}.mcool",

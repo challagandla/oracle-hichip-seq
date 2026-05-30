@@ -23,7 +23,6 @@ rule cooltools_expected_cis:
             > {output.expected} 2> {log}
         """
 
-
 rule cooltools_insulation:
     """Insulation score (TAD boundary detection)."""
     input:
@@ -45,9 +44,8 @@ rule cooltools_insulation:
             > {output.tsv} 2> {log}
         """
 
-
 rule cooltools_eigs_cis:
-    """A/B compartment eigenvectors at 100 kb."""
+    """A/B compartment eigenvectors at 100 kb, normalised to a stable TSV schema."""
     input:
         mcool = RESULTS / "cool/{sample}.mcool"
     output:
@@ -57,13 +55,8 @@ rule cooltools_eigs_cis:
     threads: 4
     log:
         RESULTS / "logs/cooltools_eigs/{sample}.log"
-    shell:
-        r"""
-        cooltools eigs-cis -p {threads} \
-            {input.mcool}::resolutions/{params.res} \
-            -o {output.cis} 2> {log}
-        """
-
+    script:
+        "../scripts/cooltools_eigs_cis.py"
 
 rule compartments_to_bigwig:
     """Export E1 (A/B compartments) to a bigWig for browser / pyGenomeTracks."""
@@ -78,7 +71,6 @@ rule compartments_to_bigwig:
         RESULTS / "logs/compartments_to_bigwig/{sample}.log"
     script:
         "../scripts/compartments_to_bigwig.py"
-
 
 rule hicrep_replicate_qc:
     """
@@ -105,7 +97,6 @@ rule hicrep_replicate_qc:
     script:
         "../scripts/hicrep_replicate_qc.py"
 
-
 rule apa_plot:
     """
     Aggregate Peak Analysis on the called loop set with random-shift controls.
@@ -113,7 +104,7 @@ rule apa_plot:
     """
     input:
         mcool = RESULTS / "cool/{sample}.mcool",
-        loops = RESULTS / "loops/{sample}/{sample}.interactions_FitHiC_Q0.01.bed"
+        loops = RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed"
     output:
         png = RESULTS / "qc/apa/{sample}.apa.png",
         json = RESULTS / "qc/apa/{sample}.apa.json"
@@ -128,10 +119,9 @@ rule apa_plot:
     script:
         "../scripts/apa_plot.py"
 
-
 rule loop_qc_summary:
     """
-    Aggregate every QC metric into a single JSON per sample with pass/fail flags.
+    Aggregate every QC metric into a single JSON per sample with pass/fail/not-assessed flags.
     Consumed by MultiQC custom content.
     """
     input:
@@ -140,7 +130,7 @@ rule loop_qc_summary:
         expected = RESULTS / "qc/expected/{sample}.expected.cis.tsv",
         apa_json = RESULTS / "qc/apa/{sample}.apa.json",
         hicrep = RESULTS / "qc/hicrep/{sample}.hicrep.json",
-        loops = RESULTS / "loops/{sample}/{sample}.interactions_FitHiC_Q0.01.bed"
+        loops = RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed"
     output:
         json = RESULTS / "qc/loop_qc/{sample}.json",
         md   = RESULTS / "qc/loop_qc/{sample}.md"

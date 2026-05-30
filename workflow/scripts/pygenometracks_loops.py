@@ -34,7 +34,7 @@ show_masked_bins = false
 height = 0.05
 
 [insulation]
-file = {insul_bw}
+file = {insul_bdg}
 title = insulation
 height = 1.5
 color = #444
@@ -68,8 +68,9 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
 
     sample = snakemake.wildcards.sample
     region = snakemake.params.region
+    mark = snakemake.params.mark
     res = int(snakemake.params.res)
-    # quick bedgraph of insulation for pgt
+
     import pandas as pd
     insul = pd.read_csv(snakemake.input.insul, sep="\t")
     if "log2_insulation_score" in insul.columns:
@@ -79,15 +80,13 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     else:
         col = insul.columns[-1]
     bedgraph = Path(snakemake.output.ini).parent / f"{sample}.insulation.bdg"
+    bedgraph.parent.mkdir(parents=True, exist_ok=True)
     insul[["chrom", "start", "end", col]].dropna().to_csv(bedgraph, sep="\t", header=False, index=False)
-
-    # find sample's mark from the samples sheet (passed via Snakemake config)
-    mark = "peak"  # default label; sample sheet not in scope here
 
     ini_text = INI_TEMPLATE.format(
         mcool=snakemake.input.mcool, res=res, sample=sample,
         peaks=snakemake.input.peaks, mark=mark,
-        loops=snakemake.input.loops, insul_bw=str(bedgraph),
+        loops=snakemake.input.loops, insul_bdg=str(bedgraph),
     )
     Path(snakemake.output.ini).write_text(ini_text)
 

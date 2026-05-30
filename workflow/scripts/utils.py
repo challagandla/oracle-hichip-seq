@@ -34,6 +34,8 @@ def read_chromsizes(path: str | Path) -> dict[str, int]:
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt") as fh:  # type: ignore[arg-type]
         for line in fh:
+            if not line.strip():
+                continue
             chrom, size = line.strip().split("\t")[:2]
             sizes[chrom] = int(size)
     return sizes
@@ -41,18 +43,32 @@ def read_chromsizes(path: str | Path) -> dict[str, int]:
 
 def load_loops_bedpe(path: str | Path) -> pd.DataFrame:
     """
-    Load a FitHiChIP / generic BEDPE. We tolerate either 6-col (BED6 BEDPE)
-    or full FitHiChIP output. Returns canonical columns:
-    [chrom1,start1,end1,chrom2,start2,end2,score,fdr]
+    Load a FitHiChIP/generic/annotated BEDPE. Headered annotated BEDPE and
+    headerless 6+ column BEDPE are both tolerated. Returns at least:
+    [chrom1,start1,end1,chrom2,start2,end2,score,fdr] when available.
     """
-    df = pd.read_csv(path, sep="\t", header=None, comment="#")
-    df = df.rename(columns={i: c for i, c in enumerate(
-        ["chrom1", "start1", "end1", "chrom2", "start2", "end2",
-         "score", "fdr"][: df.shape[1]]
-    )})
+    p = Path(path)
+    if not p.exists() or p.stat().st_size == 0:
+        return pd.DataFrame(columns=["chrom1", "start1", "end1", "chrom2", "start2", "end2", "score", "fdr"])
+
+    first = p.read_text(errors="ignore").splitlines()[0]
+    has_header = first.lower().startswith("chrom1\t") or first.lower().startswith("chrom1,")
+    if has_header:
+        df = pd.read_csv(path, sep="\t", comment="#")
+    else:
+        df = pd.read_csv(path, sep="\t", header=None, comment="#")
+        base_cols = ["chrom1", "start1", "end1", "chrom2", "start2", "end2", "score", "fdr"]
+        df = df.rename(columns={i: c for i, c in enumerate(base_cols[: df.shape[1]])})
+
+    required = ["chrom1", "start1", "end1", "chrom2", "start2", "end2"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"BEDPE {path} is missing required columns: {missing}")
     for c in ("start1", "end1", "start2", "end2"):
-        if c in df.columns:
-            df[c] = df[c].astype(int)
+        df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
+    df = df.dropna(subset=["start1", "end1", "start2", "end2"]).copy()
+    for c in ("start1", "end1", "start2", "end2"):
+        df[c] = df[c].astype(int)
     return df
 
 

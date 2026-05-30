@@ -1,16 +1,17 @@
 # Stage 02 — Alignment + pair extraction
 # bwa-mem(2) -SP5M is the canonical HiC mode (skip mate rescue, soft-clip 5'
 # supplementary, mark short hits as secondary). pairtools converts the BAM
-# into a .pairs.gz with the canonical 4-letter pair type. UU == both ends
-# uniquely mapped (the only trustworthy class for HiChIP analysis).
+# into a .pairs.gz with the canonical pair type. UU == both ends uniquely
+# mapped (the trustworthy class for HiChIP analysis).
 
 BWA_BIN = "bwa-mem2" if config["bwa"]["use_bwamem2"] else "bwa"
 BWA_IDX = GENOME["bwamem2_index"] if config["bwa"]["use_bwamem2"] else GENOME["bwa_index"]
 
 rule bwa_align_sort_pairs:
     """
-    Streamed: bwa-mem(2) -SP5M | pairtools parse --no-flip → sort by chrom/pos.
-    No intermediate BAM is written; the .pairsam.gz is the durable intermediate.
+    Streamed: bwa-mem(2) -SP5M | pairtools parse → sort by chrom/pos.
+    Read IDs are intentionally retained so FitHiChIP validPairs conversion can
+    emit a valid HiC-Pro-like first column downstream.
     """
     input:
         r1 = RESULTS / "trimmed/{sample}_R1.trim.fastq.gz",
@@ -33,15 +34,12 @@ rule bwa_align_sort_pairs:
           pairtools parse \
             --chroms-path {input.chromsizes} \
             --min-mapq {params.min_mapq} \
-            --drop-readid \
             --walks-policy {params.walks} \
             --add-columns mapq | \
-          # NOTE: SAM kept so pairtools split can emit a 1D BAM for MACS2 in stage 04
-          # (drop-sam removed — was preventing 1D-BAM extraction downstream)
+          # SAM kept so pairtools split can emit a 1D BAM for MACS2 in stage 04.
           pairtools sort --nproc {threads} -o {output.pairsam}) \
           2> {log}
         """
-
 
 rule pairtools_dedup:
     """
@@ -53,7 +51,6 @@ rule pairtools_dedup:
         pairsam = RESULTS / "pairs/{sample}.sorted.pairsam.gz"
     output:
         pairs = RESULTS / "pairs/{sample}.dedup.pairs.gz",
-        # Deduped + UU + SAM-kept so stage 04 can extract a 1D BAM
         pairsam_dedup = RESULTS / "pairs/{sample}.dedup.pairsam.gz",
         stats = RESULTS / "qc/pairtools/{sample}.dedup.stats.txt",
         unmapped = RESULTS / "pairs/{sample}.unmapped.pairs.gz"
@@ -64,8 +61,6 @@ rule pairtools_dedup:
         RESULTS / "logs/pairtools_dedup/{sample}.log"
     shell:
         r"""
-        # 1) Dedup pairsam (keeps SAM records). The 'pairsam_dedup' is the
-        #    durable lossless intermediate; stage 04 (peaks) reads from it.
         pairtools dedup \
             --mark-dups \
             --output-stats {output.stats} \
@@ -73,15 +68,12 @@ rule pairtools_dedup:
             --output {output.pairsam_dedup} \
             {input.pairsam} 2> {log}
 
-        # 2) Project to .pairs.gz (drop SAM, keep only UU) for cooler / FitHiChIP
         pairtools select '(pair_type=="UU")' \
             --output - {output.pairsam_dedup} 2>> {log} | \
         pairtools split --output-pairs {output.pairs} - 2>> {log}
 
-        # 3) pairix index for downstream cooler cload pairix
         pairix -f -p pairs {output.pairs} 2>> {log}
         """
-
 
 rule pairtools_stats:
     """

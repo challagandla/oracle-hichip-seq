@@ -1,6 +1,7 @@
 """
-Aggregate per-sample QC into a single JSON + Markdown summary with pass/fail flags.
-Cutoffs follow the BEST_PRACTICES doc.
+Aggregate per-sample QC into a single JSON + Markdown summary with pass/fail
+flags. Replicate QC uses PASS / FAIL / NOT_ASSESSED instead of pretending a
+single-replicate sample passed HiCRep.
 """
 from __future__ import annotations
 
@@ -9,26 +10,24 @@ import re
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
 from utils import setup_logging, write_json  # noqa: E402
 
 
-# ----- thresholds (mirror docs/BEST_PRACTICES.md) -----
 TH = {
-    "valid_pair_yield_pct": 25.0,     # ≥ 25% of input read pairs end up as UU
-    "duplicate_pct_max": 50.0,        # > 50% dedup → undersampled library
-    "cis_fraction_min": 0.70,         # ≥ 70% cis reads
+    "valid_pair_yield_pct": 25.0,
+    "duplicate_pct_max": 50.0,
+    "cis_fraction_min": 0.70,
     "apa_score_min": 1.5,
     "hicrep_scc_min": 0.85,
-    "n_loops_min": 1000,              # ≥ 1k FDR-significant loops per HiChIP sample
+    "n_loops_min": 1000,
 }
 
 
 def parse_pairtools_stats(path: str | Path) -> dict[str, float]:
-    """Parse the key=value style file emitted by `pairtools stats`."""
+    """Parse the key/value style file emitted by `pairtools stats`."""
     out: dict[str, float] = {}
     for line in Path(path).read_text().splitlines():
         m = re.match(r"^(\S+)\s+(\S+)", line)
@@ -40,6 +39,10 @@ def parse_pairtools_stats(path: str | Path) -> dict[str, float]:
         except ValueError:
             pass
     return out
+
+
+def _status(flag: bool) -> str:
+    return "PASS" if flag else "FAIL"
 
 
 def main(snakemake) -> None:  # type: ignore[no-untyped-def]
@@ -59,6 +62,31 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     valid_yield = (pair_stats.get("total_nodups", 0.0) / total * 100.0) if total else 0.0
     dup_pct = (total_dups / max(total, 1)) * 100.0
     cis_frac = cis / max(pair_stats.get("total_nodups", 1), 1)
+    apa_score = apa.get("apa_score")
+    hicrep_mean = hicrep.get("mean_scc")
+
+    pass_flags = {
+        "valid_pair_yield": valid_yield >= TH["valid_pair_yield_pct"],
+        "duplicate_pct": dup_pct <= TH["duplicate_pct_max"],
+        "cis_fraction": cis_frac >= TH["cis_fraction_min"],
+        "n_loops": n_loops >= TH["n_loops_min"],
+        "apa_score": (apa_score or 0) >= TH["apa_score_min"],
+    }
+    status_flags = {k: _status(v) for k, v in pass_flags.items()}
+    if hicrep_mean is None:
+        status_flags["hicrep_scc"] = "NOT_ASSESSED"
+        hicrep_pass = None
+    else:
+        hicrep_pass = hicrep_mean >= TH["hicrep_scc_min"]
+        status_flags["hicrep_scc"] = _status(hicrep_pass)
+
+    hard_pass = all(pass_flags.values()) and (hicrep_pass is not False)
+    if not hard_pass:
+        overall_status = "FAIL"
+    elif "NOT_ASSESSED" in status_flags.values():
+        overall_status = "PASS_WITH_NOT_ASSESSED"
+    else:
+        overall_status = "PASS"
 
     report = {
         "sample": snakemake.wildcards.sample,
@@ -66,24 +94,20 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         "duplicate_pct": float(dup_pct),
         "cis_fraction": float(cis_frac),
         "n_loops": int(n_loops),
-        "apa_score": apa.get("apa_score"),
+        "apa_score": apa_score,
         "apa_vs_random_shift": apa.get("apa_vs_random_shift"),
-        "hicrep_mean_scc": hicrep.get("mean_scc"),
+        "hicrep_mean_scc": hicrep_mean,
+        "hicrep_status": hicrep.get("status", status_flags["hicrep_scc"]),
         "thresholds": TH,
-        "pass_flags": {
-            "valid_pair_yield": valid_yield >= TH["valid_pair_yield_pct"],
-            "duplicate_pct":    dup_pct    <= TH["duplicate_pct_max"],
-            "cis_fraction":     cis_frac   >= TH["cis_fraction_min"],
-            "n_loops":          n_loops    >= TH["n_loops_min"],
-            "apa_score":        (apa.get("apa_score") or 0)   >= TH["apa_score_min"],
-            "hicrep_scc":       (hicrep.get("mean_scc") or 1) >= TH["hicrep_scc_min"]
-                                  if hicrep.get("mean_scc") is not None else True,
-        },
+        "pass_flags": pass_flags,
+        "status_flags": status_flags,
+        "overall_status": overall_status,
+        "overall_pass": overall_status.startswith("PASS"),
     }
-    report["overall_pass"] = all(report["pass_flags"].values())
-
     write_json(report, snakemake.output.json)
 
+    apa_line = f"- APA score: **{apa_score:.2f}** (threshold ≥ {TH['apa_score_min']})" if apa_score is not None else "- APA score: **NA**"
+    hicrep_line = f"- HiCRep mean SCC: **{hicrep_mean:.3f}** (threshold ≥ {TH['hicrep_scc_min']})" if hicrep_mean is not None else "- HiCRep mean SCC: **NOT_ASSESSED**"
     md_lines = [
         f"# QC report — {snakemake.wildcards.sample}",
         "",
@@ -91,11 +115,10 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         f"- Duplicate %: **{dup_pct:.1f}%** (threshold ≤ {TH['duplicate_pct_max']}%)",
         f"- Cis fraction: **{cis_frac:.2f}** (threshold ≥ {TH['cis_fraction_min']:.2f})",
         f"- N significant loops: **{n_loops}** (threshold ≥ {TH['n_loops_min']})",
-        f"- APA score: **{apa.get('apa_score'):.2f}** (threshold ≥ {TH['apa_score_min']})"
-            if apa.get('apa_score') is not None else "- APA score: NA",
-        f"- HiCRep mean SCC: **{hicrep.get('mean_scc')}** (threshold ≥ {TH['hicrep_scc_min']})",
+        apa_line,
+        hicrep_line,
         "",
-        f"**Overall: {'PASS' if report['overall_pass'] else 'FAIL'}**",
+        f"**Overall: {overall_status}**",
     ]
     Path(snakemake.output.md).write_text("\n".join(md_lines))
 

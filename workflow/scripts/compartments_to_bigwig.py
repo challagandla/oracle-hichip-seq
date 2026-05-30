@@ -1,8 +1,4 @@
-"""
-Export the E1 eigenvector (A/B compartments) from cooltools eigs-cis output
-to a bigWig file. Pulled out of 06_loop_qc.smk to avoid fragile embedded
-Python in shell.
-"""
+"""Export the E1 eigenvector (A/B compartments) to bigWig."""
 from __future__ import annotations
 
 import sys
@@ -17,23 +13,27 @@ from utils import read_chromsizes, setup_logging  # noqa: E402
 
 def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     setup_logging(snakemake.log[0])
+    out = Path(snakemake.output.bw)
+    out.parent.mkdir(parents=True, exist_ok=True)
 
-    df = pd.read_csv(snakemake.input.eigs, sep="\t").dropna(subset=["E1"])
     sizes = read_chromsizes(snakemake.params.chromsizes)
-    # Drop rows whose chromosome is not in the chromsizes (Y / MT / decoys)
+    df = pd.read_csv(snakemake.input.eigs, sep="\t")
+    if "E1" not in df.columns:
+        raise ValueError(f"{snakemake.input.eigs} does not contain an E1 column")
+    df = df.dropna(subset=["E1"])
     df = df[df["chrom"].isin(sizes)]
-    if df.empty:
-        Path(snakemake.output.bw).write_bytes(b"")
-        return
-    bw = pyBigWig.open(str(snakemake.output.bw), "w")
-    bw.addHeader([(c, int(s)) for c, s in sizes.items() if c in set(df["chrom"])])
-    df = df.sort_values(["chrom", "start"])
-    bw.addEntries(
-        df["chrom"].astype(str).tolist(),
-        df["start"].astype(int).tolist(),
-        ends=df["end"].astype(int).tolist(),
-        values=df["E1"].astype(float).tolist(),
-    )
+
+    bw = pyBigWig.open(str(out), "w")
+    header_chroms = sorted(set(df["chrom"])) if not df.empty else list(sizes.keys())
+    bw.addHeader([(c, int(sizes[c])) for c in header_chroms if c in sizes])
+    if not df.empty:
+        df = df.sort_values(["chrom", "start"])
+        bw.addEntries(
+            df["chrom"].astype(str).tolist(),
+            df["start"].astype(int).tolist(),
+            ends=df["end"].astype(int).tolist(),
+            values=df["E1"].astype(float).tolist(),
+        )
     bw.close()
 
 

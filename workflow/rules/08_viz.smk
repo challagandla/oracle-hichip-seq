@@ -8,7 +8,7 @@ rule pygenometracks_region:
     """
     input:
         mcool = RESULTS / "cool/{sample}.mcool",
-        loops = RESULTS / "loops/{sample}/{sample}.interactions_FitHiC_Q0.01.bed",
+        loops = RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed",
         peaks = RESULTS / "peaks/{sample}_peaks.bed",
         insul = RESULTS / "qc/insulation/{sample}.insulation.tsv"
     output:
@@ -16,6 +16,7 @@ rule pygenometracks_region:
         png = RESULTS / "viz/{sample}_{region}.png"
     params:
         region = lambda wc: next(r for r in config["viz"]["regions"] if r["name"] == wc.region),
+        mark = sample_mark,
         res = 10000
     threads: 2
     log:

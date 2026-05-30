@@ -1,16 +1,16 @@
 # ORACLE HiChIP pipeline — main Snakefile
-# Run from code/hichip/ directory:
-#   snakemake -n --configfile config/config.yaml             # dry run / DAG
-#   snakemake --cores 32 --configfile config/config.yaml     # full run
+# Run from repository root:
+#   snakemake -s workflow/Snakefile -n --configfile config/config.yaml
+#   snakemake -s workflow/Snakefile --cores 32 --configfile config/config.yaml --use-conda
 #
-# Stages (each a separate include/.smk file):
-#   01_qc_raw          FastQC + fastp adapter/quality trim, MultiQC raw report
-#   02_align_pairs     bwa-mem(2) -SP5M + pairtools parse/sort/dedup → .pairs.gz
+# Stages:
+#   01_qc_raw          FastQC + fastp adapter/quality trim
+#   02_align_pairs     bwa-mem2 -SP5M + pairtools parse/sort/dedup → .pairs.gz
 #   03_cool_matrix     cooler load + zoomify + balance (ICE)
 #   04_peaks           Extract 1D reads, MACS2 narrow/broad peaks per mark
 #   05_loops_fithichip FitHiChIP Peak-to-ALL loop calling
 #   06_loop_qc         cis/trans, P(s), insulation, APA, HiCRep replicate QC
-#   07_differential    tumor-vs-normal loop differential (pyDESeq2 / diffHic)
+#   07_differential    mark-stratified differential loops
 #   08_viz             pyGenomeTracks, APA plots, virtual 4C
 #   09_export_oracle   Multi-resolution COS graph + node features (PyG / .h5)
 #   10_multiqc         Aggregate MultiQC across all stages
@@ -28,23 +28,27 @@ with open(config["genome_yaml"]) as fh:
 ASSEMBLY = config["assembly"]
 GENOME = GENOME_CFG[ASSEMBLY]
 
-SAMPLES = pd.read_csv(config["samples_tsv"], sep="\t", dtype=str).set_index("sample_id", drop=False)
+SAMPLES = pd.read_csv(config["samples_tsv"], sep="\t", dtype=str, comment="#").set_index("sample_id", drop=False)
 SAMPLE_IDS = SAMPLES["sample_id"].tolist()
-MARKS = sorted(SAMPLES["mark"].unique())
+MARKS = sorted(SAMPLES["mark"].dropna().unique())
 
 RESULTS = Path(config["results_dir"])
+FITHICHIP_Q_LABEL = f"Q{config['fithichip']['fdr_threshold']}"
 
 # convenience accessors used by rule files
 def fastq_r1(wc): return SAMPLES.loc[wc.sample, "fastq_r1"]
 def fastq_r2(wc): return SAMPLES.loc[wc.sample, "fastq_r2"]
 def sample_mark(wc): return SAMPLES.loc[wc.sample, "mark"]
+def fithichip_loop_path(sample):
+    return RESULTS / f"loops/{sample}/{sample}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed"
 
-# ---------- Wildcard constraints (raw strings, Py3.12 clean) ----------
+# ---------- Wildcard constraints ----------
 wildcard_constraints:
     sample = r"[A-Za-z0-9_]+",
-    res    = r"\d+",                    # bin size in bp
+    res    = r"\d+",
     mark   = r"[A-Za-z0-9]+",
-    region = r"[A-Za-z0-9_\-]+"
+    region = r"[A-Za-z0-9_\-]+",
+    comparison = r"[A-Za-z0-9_\-]+"
 
 # ---------- Include all rule files ----------
 include: "rules/01_qc_raw.smk"
@@ -66,7 +70,7 @@ rule all:
         # Per-sample core artefacts
         expand(RESULTS / "cool/{sample}.mcool", sample=SAMPLE_IDS),
         expand(RESULTS / "peaks/{sample}_peaks.bed", sample=SAMPLE_IDS),
-        expand(RESULTS / "loops/{sample}/{sample}.interactions_FitHiC_Q0.01.bed", sample=SAMPLE_IDS),
+        expand(RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed", sample=SAMPLE_IDS),
         expand(RESULTS / "qc/loop_qc/{sample}.json", sample=SAMPLE_IDS),
         # ORACLE-ready exports
         expand(RESULTS / "oracle_cos/{sample}.pt", sample=SAMPLE_IDS),
@@ -77,7 +81,7 @@ rule all:
         # MultiQC aggregate report
         RESULTS / "multiqc/multiqc_report.html"
 
-# ---------- Convenience phony targets (one block per rule, multi-line form) ----------
+# ---------- Convenience phony targets ----------
 rule qc_raw:
     input:
         expand(RESULTS / "qc/fastqc_raw/{sample}_R1_fastqc.html", sample=SAMPLE_IDS)
@@ -96,7 +100,7 @@ rule peaks:
 
 rule loops_fithichip:
     input:
-        expand(RESULTS / "loops/{sample}/{sample}.interactions_FitHiC_Q0.01.bed", sample=SAMPLE_IDS)
+        expand(RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed", sample=SAMPLE_IDS)
 
 rule loop_qc:
     input:
@@ -105,6 +109,11 @@ rule loop_qc:
 rule export_oracle:
     input:
         expand(RESULTS / "oracle_cos/{sample}.pt", sample=SAMPLE_IDS)
+
+rule differential_all:
+    input:
+        expand(RESULTS / "diff/{comparison}/differential_loops.tsv",
+               comparison=[c["name"] for c in config.get("differential", {}).get("comparisons", [])])
 
 rule multiqc:
     input:

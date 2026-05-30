@@ -1,5 +1,5 @@
 # ORACLE HiChIP pipeline configuration
-# All paths are absolute; override per-run with --config key=value or a second --configfile.
+# Override paths per run with --config key=value or a second --configfile.
 
 # ---------- I/O ----------
 samples_tsv: config/samples.tsv          # one row per HiChIP sample
@@ -10,7 +10,7 @@ results_dir: "results"                   # all derived outputs
 # ---------- Genome ----------
 assembly: "hg38"                         # hg38 | T2T-CHM13 | mm10
 
-# ---------- Threads (per-rule overrides in Snakemake too) ----------
+# ---------- Threads ----------
 threads:
   fastqc: 4
   fastp: 8
@@ -31,13 +31,13 @@ fastp:
 # ---------- bwa-mem(2) ----------
 bwa:
   use_bwamem2: true                            # 2-3x faster than bwa-mem
-  flags: "-SP5M"                               # canonical HiC mode
+  flags: "-SP5M"                               # canonical HiC/HiChIP mode
 
 # ---------- pairtools ----------
 pairtools:
   min_mapq: 30
   walks_policy: "mask"                         # mask walk pair-types (5end3 etc)
-  keep_pair_types: ["UU"]                      # uniquely-mapped only
+  keep_pair_types: ["UU"]                      # uniquely mapped pairs only
 
 # ---------- cooler ----------
 cooler:
@@ -67,9 +67,14 @@ fithichip:
   lower_distance: 20000                        # 20 kb
   upper_distance: 3000000                      # 3 Mb
   fdr_threshold: 0.01
-  background_type: "Coverage_Bias"             # "Peak-to-ALL" recommended; this is the bg model
-  interaction_type: "Peak-to-ALL"
-  min_reads: 6
+  interaction_type: "Peak-to-ALL"              # human-readable label for reports
+  background_type: "Coverage_Bias"             # human-readable label for reports
+  # FitHiChIP native codes. Keeping them explicit avoids silent mismatch between
+  # human labels and FitHiChIP's historical INI keys.
+  int_type_code: 3                              # current project default: Peak-to-ALL
+  bias_type_code: 1                             # coverage-bias correction
+  use_p2p_background: 1
+  min_reads: 6                                  # downstream reporting threshold
 
 # ---------- Replicate QC ----------
 hicrep:
@@ -86,13 +91,22 @@ apa:
   n_random_controls: 5                         # random-shift controls per loop
 
 # ---------- Differential loops ----------
+# Differential analysis must be stratified by mark, tissue, protocol and batch-aware
+# where possible. Leave comparisons empty until real matched case/control samples
+# exist for the same mark and tissue class.
 differential:
   fdr: 0.05
   log2fc_min: 1.0
   method: "pyDESeq2"                           # pyDESeq2 | diffhic_r
+  comparisons: []
+  # Example once matched H3K27ac controls exist:
+  # comparisons:
+  #   - name: ovarian_tumor_vs_adjacent_H3K27ac
+  #     mark: H3K27ac
+  #     case_filter:    { tissue: tumor, disease: ovarian_HGSOC, library_protocol: HiChIP_v2 }
+  #     control_filter: { tissue: adjacent_normal, disease: non_cancer, library_protocol: HiChIP_v2 }
 
 # ---------- Visualisation regions of interest ----------
-# Override per project. These are examples for the ovarian deep-dive.
 viz:
   regions:
     - { name: "MYC_locus",   chrom: "chr8",  start: 126500000, end: 129500000 }
@@ -103,7 +117,7 @@ viz:
 # ---------- ORACLE COS export ----------
 oracle_export:
   output_format: "pyg"                         # pyg | h5
-  emit_bigwigs: true                           # for every mark, per sample
+  emit_bigwigs: true                           # reserved for future signal-channel expansion
   blacklist_bed: "resources/hg38-blacklist.v2.bed.gz"
   microbiome_metadata_tsv: "config/microbiome_tokens.tsv"   # optional; one row per sample
   drop_chromosomes: ["chrM", "chrY"]
