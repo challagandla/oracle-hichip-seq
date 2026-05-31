@@ -28,3 +28,27 @@ jobs:
           test -f workflow/rules/07_differential.smk
           test -f workflow/scripts/export_oracle_cos.py
           test -f workflow/scripts/cooltools_eigs_cis.py
+          test -f config/multiqc_config.yaml
+          test -f resources/download_resources.sh
+          test -f profiles/slurm/config.yaml
+          test -f TUTORIAL.md
+
+      - name: Verify dead code removed
+        run: |
+          # insulation_compartments.py was an orphaned script — must not exist
+          test ! -f workflow/scripts/insulation_compartments.py
+
+      - name: Check no '|| true' on output-producing steps
+        run: |
+          # '|| true' silently swallows failures in output steps — forbidden
+          if grep -rn "|| true" workflow/rules/; then
+            echo "ERROR: '|| true' found in rule files — remove it"; exit 1
+          fi
+
+      - name: Validate multiqc config YAML syntax
+        run: |
+          python -c "import yaml; yaml.safe_load(open('config/multiqc_config.yaml'))"
+
+      - name: Check download script is executable-syntax-valid
+        run: |
+          bash -n resources/download_resources.sh

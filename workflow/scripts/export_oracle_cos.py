@@ -8,6 +8,7 @@ channels are intentionally left for sister modality pipelines and later merge.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -216,6 +217,26 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
 
     torch.save(data, snakemake.output.pt)
 
+    def _sha256(path: str) -> str:
+        """Return hex SHA-256 of a file, or 'MISSING' if it does not exist."""
+        p = Path(path)
+        if not p.exists():
+            return "MISSING"
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    input_hashes = {
+        "mcool":        _sha256(snakemake.input.mcool),
+        "loops_annot":  _sha256(snakemake.input.loops_annot),
+        "peaks":        _sha256(snakemake.input.peaks),
+        "insulation":   _sha256(snakemake.input.insul),
+        "eigenvectors": _sha256(snakemake.input.eigs),
+        "loop_qc":      _sha256(snakemake.input.loop_qc),
+    }
+
     manifest = {
         "sample_id": sample_id,
         "resolutions_bp": bin_sizes_bp,
@@ -223,7 +244,11 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         "edge_kinds": {"0": "adjacency", "1": "loop"},
         "edge_attr_channels": ["loop_score", "loop_fdr", "genomic_distance_bp"],
         "microbiome_keys": micro_keys,
-        "scope_note": "Prototype HiChIP COS export: peak-overlap count is not continuous per-mark ChIP/CUT&Tag signal. Additional modality channels should be merged by sister pipelines.",
+        "scope_note": (
+            "Prototype HiChIP COS export: peak-overlap count is not continuous per-mark "
+            "ChIP/CUT&Tag signal. Additional modality channels should be merged by sister pipelines."
+        ),
+        "input_sha256": input_hashes,
         "outputs": {"pt": str(snakemake.output.pt), "h5": str(snakemake.output.h5)},
     }
     Path(snakemake.output.manifest).write_text(json.dumps(manifest, indent=2))

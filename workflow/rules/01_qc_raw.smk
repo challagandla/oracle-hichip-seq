@@ -19,8 +19,18 @@ rule fastqc_raw:
         mkdir -p {params.outdir}
         fastqc -t {threads} -o {params.outdir} {input.r1} {input.r2} 2> {log}
         # rename outputs to canonical names regardless of fastq filename
-        mv {params.outdir}/$(basename {input.r1} .fastq.gz)_fastqc.html {output.r1_html} 2>>{log} || true
-        mv {params.outdir}/$(basename {input.r2} .fastq.gz)_fastqc.html {output.r2_html} 2>>{log} || true
+        # Derive stem robustly — strip .fastq.gz, .fq.gz, or .fastq
+        R1_STEM=$(basename {input.r1}); R1_STEM=${{R1_STEM%.fastq.gz}}; R1_STEM=${{R1_STEM%.fq.gz}}; R1_STEM=${{R1_STEM%.fastq}}
+        R2_STEM=$(basename {input.r2}); R2_STEM=${{R2_STEM%.fastq.gz}}; R2_STEM=${{R2_STEM%.fq.gz}}; R2_STEM=${{R2_STEM%.fastq}}
+
+        # Fail loudly — never use || true on output-producing steps
+        test -f "{params.outdir}/${{R1_STEM}}_fastqc.html" || \
+            {{ echo "ERROR: FastQC did not produce ${{R1_STEM}}_fastqc.html" >&2; exit 1; }}
+        test -f "{params.outdir}/${{R2_STEM}}_fastqc.html" || \
+            {{ echo "ERROR: FastQC did not produce ${{R2_STEM}}_fastqc.html" >&2; exit 1; }}
+
+        mv "{params.outdir}/${{R1_STEM}}_fastqc.html" {output.r1_html} 2>>{log}
+        mv "{params.outdir}/${{R2_STEM}}_fastqc.html" {output.r2_html} 2>>{log}
         """
 
 

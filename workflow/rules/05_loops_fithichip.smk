@@ -84,12 +84,30 @@ rule fithichip_run:
         q_label = FITHICHIP_Q_LABEL
     shell:
         r"""
-        FitHiChIP_HiCPro.sh -C {input.cfg} 2> {log}
-        # Normalise output name in case a FitHiChIP version emits an equivalent
-        # filename with slightly different path nesting.
+        # FitHiChIP ships two front-ends depending on installation method:
+        #   bioconda package  →  `fithichip --cfg <file>`
+        #   legacy shell      →  `FitHiChIP_HiCPro.sh -C <file>`
+        # We prefer the bioconda entrypoint; fall back to the shell script.
+        if command -v fithichip >/dev/null 2>&1; then
+            fithichip --cfg {input.cfg} 2> {log}
+        elif command -v FitHiChIP_HiCPro.sh >/dev/null 2>&1; then
+            FitHiChIP_HiCPro.sh -C {input.cfg} 2> {log}
+        else
+            echo "ERROR: neither 'fithichip' nor 'FitHiChIP_HiCPro.sh' found in PATH." >&2
+            echo "Install with: mamba install -c bioconda fithichip" >&2
+            exit 1
+        fi
+
+        # Normalise output path — FitHiChIP versions differ in subdirectory nesting
         if [ ! -s {output.loops} ]; then
-            found=$(find $(dirname {output.loops}) -type f -name "*interactions_FitHiC_{params.q_label}.bed" | head -n 1)
-            if [ -n "$found" ]; then cp "$found" {output.loops}; fi
+            found=$(find "$(dirname {output.loops})" -type f \
+                    -name "*interactions_FitHiC_{params.q_label}.bed" | head -n 1)
+            if [ -n "$found" ]; then
+                cp "$found" {output.loops}
+            else
+                echo "ERROR: FitHiChIP produced no output BED at q={params.q_label}" >&2
+                exit 1
+            fi
         fi
         test -s {output.loops}
         """

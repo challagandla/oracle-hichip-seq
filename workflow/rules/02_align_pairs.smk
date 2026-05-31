@@ -37,7 +37,9 @@ rule bwa_align_sort_pairs:
             --walks-policy {params.walks} \
             --add-columns mapq | \
           # SAM kept so pairtools split can emit a 1D BAM for MACS2 in stage 04.
-          pairtools sort --nproc {threads} -o {output.pairsam}) \
+          pairtools sort --nproc {threads} \
+              --tmpdir "${{TMPDIR:-/tmp}}" \
+              -o {output.pairsam}) \
           2> {log}
         """
 
@@ -61,6 +63,7 @@ rule pairtools_dedup:
         RESULTS / "logs/pairtools_dedup/{sample}.log"
     shell:
         r"""
+        # Step 1: deduplicate at pair-level (NOT read-level)
         pairtools dedup \
             --mark-dups \
             --output-stats {output.stats} \
@@ -68,10 +71,16 @@ rule pairtools_dedup:
             --output {output.pairsam_dedup} \
             {input.pairsam} 2> {log}
 
+        # Step 2: keep only UU pairs and split to .pairs.gz
+        # NOTE: {output.pairsam_dedup} is used as INPUT here (already written above).
+        # These are sequential shell commands — no parallelism issue.
         pairtools select '(pair_type=="UU")' \
-            --output - {output.pairsam_dedup} 2>> {log} | \
+            --output-rest /dev/null \
+            --output - \
+            {output.pairsam_dedup} 2>> {log} | \
         pairtools split --output-pairs {output.pairs} - 2>> {log}
 
+        # Step 3: index the .pairs.gz with pairix (required by cooler cload pairix)
         pairix -f -p pairs {output.pairs} 2>> {log}
         """
 

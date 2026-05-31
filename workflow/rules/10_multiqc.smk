@@ -18,7 +18,16 @@ rule multiqc_report:
         searchdir = RESULTS
     log:
         RESULTS / "logs/multiqc/multiqc.log"
+    params:
+        outdir    = RESULTS / "multiqc",
+        searchdir = RESULTS,
+        mqc_cfg   = "config/multiqc_config.yaml"
     shell:
         r"""
-        multiqc -f -o {params.outdir} -n multiqc_report {params.searchdir} 2> {log}
+        multiqc -f \
+            --config {params.mqc_cfg} \
+            -o {params.outdir} \
+            -n multiqc_report \
+            {params.searchdir} \
+        2> {log}
         """

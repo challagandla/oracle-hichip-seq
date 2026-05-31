@@ -24,9 +24,16 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     counts: list[int] = []
     for _, row in loops.iterrows():
         try:
+            # Snap anchor coordinates to the bin grid.
+            # Anchors not aligned to `res` boundaries return zero counts silently
+            # when passed raw to cooler — floor-rounding to the bin start fixes this.
+            s1 = int(row.start1) // res * res
+            e1 = s1 + res
+            s2 = int(row.start2) // res * res
+            e2 = s2 + res
             mat = clr.matrix(balance=False).fetch(
-                (str(row.chrom1), int(row.start1), int(row.end1)),
-                (str(row.chrom2), int(row.start2), int(row.end2)),
+                (str(row.chrom1), s1, e1),
+                (str(row.chrom2), s2, e2),
             )
             counts.append(int(mat.sum()))
         except Exception:

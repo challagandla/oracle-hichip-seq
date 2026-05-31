@@ -4,6 +4,8 @@ End-to-end HiChIP processing — paired-end FASTQ in, ORACLE-ready Chromatin Ope
 
 > Component of the **ORACLE** research program (Onco-Regulatory Architecture and Chromatin Latent Engine). The proposal and foundation-model training code live in separate repositories.
 
+📖 **New here? Start with the [step-by-step tutorial →](TUTORIAL.md)**
+
 ## Why these tool choices
 
 | Choice | What we use | Why |
