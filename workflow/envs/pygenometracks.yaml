@@ -1,0 +1,9 @@
+# pyGenomeTracks composite region figures (stage 08)
+name: oracle-hichip-pygenometracks
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - pygenometracks=3.9.*
+  - pandas=2.2.*

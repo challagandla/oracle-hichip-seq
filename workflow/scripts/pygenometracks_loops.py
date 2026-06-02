@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from utils import setup_logging  # noqa: E402
+from utils import select_insulation_column, setup_logging  # noqa: E402
 
 INI_TEMPLATE = """\
 [x-axis]
@@ -73,12 +73,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
 
     import pandas as pd
     insul = pd.read_csv(snakemake.input.insul, sep="\t")
-    if "log2_insulation_score" in insul.columns:
-        col = "log2_insulation_score"
-    elif "insulation" in insul.columns:
-        col = "insulation"
-    else:
-        col = insul.columns[-1]
+    col = select_insulation_column(insul)
     bedgraph = Path(snakemake.output.ini).parent / f"{sample}.insulation.bdg"
     bedgraph.parent.mkdir(parents=True, exist_ok=True)
     insul[["chrom", "start", "end", col]].dropna().to_csv(bedgraph, sep="\t", header=False, index=False)

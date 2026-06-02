@@ -1,0 +1,9 @@
+# Pure-pandas script rules (loop QC summary aggregation, stage 06)
+name: oracle-hichip-pandas
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pandas=2.2.*
+  - numpy=1.26.*

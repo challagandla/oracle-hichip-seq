@@ -41,7 +41,9 @@ results/
 *.npz
 *.pkl
 data/
-resources/
+resources/*
+!resources/
+!resources/download_resources.sh
 references/
 fasta/
 fastq/

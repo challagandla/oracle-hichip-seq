@@ -14,11 +14,18 @@ rule pairs_to_1d_bam:
         bam = RESULTS / "bam_1d/{sample}.1d.bam",
         bai = RESULTS / "bam_1d/{sample}.1d.bam.bai"
     threads: config["threads"]["pairtools"]
+    params:
+        keep_expr = PAIRTOOLS_KEEP_EXPR
+    conda: "../envs/align.yaml"
     log:
         RESULTS / "logs/pairs_to_1d/{sample}.log"
     shell:
         r"""
-        pairtools split --output-sam - {input.pairsam} 2> {log} | \
+        pairtools select '{params.keep_expr}' \
+            --output-rest /dev/null \
+            --output - \
+            {input.pairsam} 2> {log} | \
+        pairtools split --output-sam - - 2>> {log} | \
             samtools sort -@ {threads} -o {output.bam} - 2>> {log}
         samtools index -@ {threads} {output.bam} 2>> {log}
         """
@@ -52,6 +59,7 @@ rule macs2_peaks:
         broad_cutoff = _macs2_broad_cutoff,
         outdir = RESULTS / "peaks/raw"
     threads: config["threads"]["macs2"]
+    conda: "../envs/macs2.yaml"
     log:
         RESULTS / "logs/macs2/{sample}.log"
     shell:

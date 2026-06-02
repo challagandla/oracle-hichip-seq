@@ -16,7 +16,7 @@ End-to-end HiChIP processing — paired-end FASTQ in, ORACLE-ready Chromatin Ope
 | Storage | **`.cool` / `.mcool` (cooler)** | Compressed, HDF5-backed, multi-resolution. Generates `.hic` only on demand for Juicebox. |
 | Loop calling | **FitHiChIP `Peak-to-ALL`** | Peak-anchored HiChIP loop caller; models 1D ChIP bias. Mustache used as cross-check. |
 | Peak calling | **MACS2** | Narrow peaks for K27ac/K4me3/CTCF; broad peaks for K27me3/K36me2/K36me3. |
-| Replicate QC | **HiCRep (`hicreppy`)** | Stratum-adjusted correlation robust to distance decay. Missing replicate comparisons are now reported as `NOT_ASSESSED`, not true PASS. |
+| Replicate QC | **HiCRep (`hicrep`)** | Stratum-adjusted correlation robust to distance decay. Missing replicate comparisons are now reported as `NOT_ASSESSED`, not true PASS. |
 | QC suite | **`cooltools` + `pairtools stats` + `MultiQC`** | Cis/trans, distance-decay, P(s), insulation, compartments, APA. |
 | Differential loops | **`pyDESeq2`** on per-loop counts | Comparison definitions are explicit and guarded against mixing marks/tissues/protocols. |
 | Visualisation | **`pyGenomeTracks` + cooltools APA + HiGlass optional** | Publication-grade static figures; interactive browsing for collaborators. |

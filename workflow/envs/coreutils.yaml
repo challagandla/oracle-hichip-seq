@@ -1,0 +1,9 @@
+# Minimal POSIX tools for awk/zcat/sort/cat file-shaping rules
+name: oracle-hichip-coreutils
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - coreutils
+  - gawk
+  - gzip

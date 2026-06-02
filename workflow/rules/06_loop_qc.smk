@@ -14,6 +14,7 @@ rule cooltools_expected_cis:
     params:
         res = 25000
     threads: 4
+    conda: "../envs/cooltools.yaml"
     log:
         RESULTS / "logs/cooltools_expected/{sample}.log"
     shell:
@@ -33,6 +34,7 @@ rule cooltools_insulation:
         res = 25000,
         window = 250000
     threads: 4
+    conda: "../envs/cooltools.yaml"
     log:
         RESULTS / "logs/cooltools_insulation/{sample}.log"
     shell:
@@ -53,6 +55,7 @@ rule cooltools_eigs_cis:
     params:
         res = 100000
     threads: 4
+    conda: "../envs/cooltools.yaml"
     log:
         RESULTS / "logs/cooltools_eigs/{sample}.log"
     script:
@@ -67,6 +70,7 @@ rule compartments_to_bigwig:
     params:
         chromsizes = GENOME["chromsizes"]
     threads: 1
+    conda: "../envs/coolerpy.yaml"
     log:
         RESULTS / "logs/compartments_to_bigwig/{sample}.log"
     script:
@@ -92,6 +96,7 @@ rule hicrep_replicate_qc:
         maxd = config["hicrep"]["max_dist"],
         h = config["hicrep"]["h_smooth"]
     threads: 4
+    conda: "../envs/hicrep.yaml"
     log:
         RESULTS / "logs/hicrep/{sample}.log"
     script:
@@ -114,6 +119,7 @@ rule apa_plot:
         min_dist = config["apa"]["min_loop_dist"],
         n_ctrl = config["apa"]["n_random_controls"]
     threads: 4
+    conda: "../envs/coolerpy.yaml"
     log:
         RESULTS / "logs/apa/{sample}.log"
     script:
@@ -135,6 +141,7 @@ rule loop_qc_summary:
         json = RESULTS / "qc/loop_qc/{sample}.json",
         md   = RESULTS / "qc/loop_qc/{sample}.md"
     threads: 1
+    conda: "../envs/pandas.yaml"
     log:
         RESULTS / "logs/loop_qc_summary/{sample}.log"
     script:

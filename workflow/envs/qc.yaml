@@ -1,0 +1,9 @@
+# Read QC + trimming (stage 01)
+name: oracle-hichip-qc
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - fastqc=0.12.*
+  - fastp=0.23.*

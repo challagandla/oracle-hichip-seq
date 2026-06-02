@@ -8,6 +8,7 @@ script is called.
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
 from pathlib import Path
 
@@ -18,10 +19,18 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent))
 from utils import setup_logging  # noqa: E402
 
+LOOP_COORD_COLS = ["chrom1", "start1", "end1", "chrom2", "start2", "end2"]
 
-def _load_count_table(files: list[str]) -> tuple[pd.DataFrame, list[str]]:
+
+def _loop_keys(coords: pd.DataFrame) -> pd.Series:
+    encoded = coords[LOOP_COORD_COLS].astype(str).agg("\x1f".join, axis=1)
+    return encoded.map(lambda value: hashlib.sha1(value.encode("utf-8")).hexdigest())
+
+
+def _load_count_table(files: list[str]) -> tuple[pd.DataFrame, list[str], pd.DataFrame]:
     """Read all per-sample counts.tsv into a single (loop × sample) matrix."""
     frames = []
+    coord_frames = []
     sample_order: list[str] = []
     for f in files:
         df = pd.read_csv(f, sep="\t")
@@ -29,12 +38,16 @@ def _load_count_table(files: list[str]) -> tuple[pd.DataFrame, list[str]]:
             continue
         sid = df["sample"].iloc[0]
         sample_order.append(sid)
-        key = df[["chrom1", "start1", "end1", "chrom2", "start2", "end2"]].astype(str).agg("_".join, axis=1)
+        coords = df[LOOP_COORD_COLS].copy()
+        key = _loop_keys(coords)
         frames.append(pd.Series(df["count"].values, index=key, name=sid))
+        coords.insert(0, "loop_key", key)
+        coord_frames.append(coords)
     if not frames:
         raise RuntimeError("No loop-count tables contained data")
     M = pd.concat(frames, axis=1).fillna(0).astype(int)
-    return M, sample_order
+    coords = pd.concat(coord_frames, ignore_index=True).drop_duplicates("loop_key")
+    return M, sample_order, coords
 
 
 def _pydeseq2(M: pd.DataFrame, cases: list[str], controls: list[str], fdr: float, lfc: float) -> pd.DataFrame:
@@ -102,7 +115,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     if not cases or not controls:
         raise RuntimeError(f"Comparison {snakemake.wildcards.comparison} has empty case/control groups")
 
-    M, order = _load_count_table(list(snakemake.input.counts))
+    M, order, coords = _load_count_table(list(snakemake.input.counts))
     missing_cases = sorted(set(cases) - set(M.columns))
     missing_controls = sorted(set(controls) - set(M.columns))
     if missing_cases or missing_controls:
@@ -115,12 +128,9 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     else:
         raise ValueError(f"Unknown differential method {method!r}")
 
-    loop_keys = M.index.str.split("_", expand=True)
-    res = res.reset_index().rename(columns={"index": "loop_key"})
-    coords = pd.DataFrame(loop_keys.tolist(),
-                          columns=["chrom1", "start1", "end1", "chrom2", "start2", "end2"],
-                          index=M.index)
-    res = res.join(coords, on="loop_key").sort_values("padj")
+    res.index = res.index.astype(str)
+    res.index.name = "loop_key"
+    res = res.reset_index().merge(coords, on="loop_key", how="left").sort_values("padj")
     Path(snakemake.output.tsv).parent.mkdir(parents=True, exist_ok=True)
     res.to_csv(snakemake.output.tsv, sep="\t", index=False)
 

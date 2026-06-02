@@ -1,0 +1,9 @@
+# cooler matrix build + balance (stage 03)
+name: oracle-hichip-cooler
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - cooler=0.10.*
+  - pairix=0.3.*

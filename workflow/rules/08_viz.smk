@@ -19,6 +19,7 @@ rule pygenometracks_region:
         mark = sample_mark,
         res = 10000
     threads: 2
+    conda: "../envs/pygenometracks.yaml"
     log:
         RESULTS / "logs/viz/{sample}_{region}.log"
     script:
@@ -39,6 +40,7 @@ rule virtual_4c:
         region = lambda wc: next(r for r in config["viz"]["regions"] if r["name"] == wc.region),
         res = 5000
     threads: 2
+    conda: "../envs/coolerpy.yaml"
     log:
         RESULTS / "logs/virtual_4c/{sample}_{region}.log"
     script:

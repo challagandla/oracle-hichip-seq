@@ -12,6 +12,7 @@ rule annotate_loops:
     output:
         bedpe = RESULTS / "oracle_cos/intermediates/{sample}.annotated_loops.bedpe"
     threads: 2
+    conda: "../envs/pyranges.yaml"
     log:
         RESULTS / "logs/annotate_loops/{sample}.log"
     script:
@@ -39,11 +40,13 @@ rule export_oracle_cos:
     params:
         bin_sizes_bp = ORACLE_BIN_SIZES_BP,
         chromsizes = GENOME["chromsizes"],
-        blacklist = config["oracle_export"]["blacklist_bed"],
+        # Per-assembly blacklist from genome.yaml (single source of truth).
+        blacklist = GENOME.get("blacklist", ""),
         microbiome_tsv = config["oracle_export"].get("microbiome_metadata_tsv", ""),
         drop_chroms = config["oracle_export"]["drop_chromosomes"],
         emit_bigwigs = config["oracle_export"]["emit_bigwigs"]
     threads: 8
+    conda: "../envs/oracle_export.yaml"
     log:
         RESULTS / "logs/export_oracle/{sample}.log"
     script:

@@ -1,0 +1,17 @@
+# HiCRep stratum-adjusted replicate correlation (stage 06)
+# NB: `hicrep` is the PyPI package providing hicrepSCC + hicrep.utils.readMcool,
+# distinct from conda's `hicreppy`. Installed via pip here.
+name: oracle-hichip-hicrep
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.11
+  - cooler=0.10.*
+  - h5py=3.11.*
+  - numpy=1.26.*
+  - scipy=1.13.*
+  - pip
+  - pip:
+      - hicrep

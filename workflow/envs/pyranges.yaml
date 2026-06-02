@@ -1,0 +1,10 @@
+# Loop anchor annotation with pyranges (stage 09)
+name: oracle-hichip-pyranges
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pyranges=0.1.*
+  - pandas=2.2.*

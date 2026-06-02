@@ -1,0 +1,10 @@
+# cooltools P(s), insulation, eigenvectors (stage 06)
+name: oracle-hichip-cooltools
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - cooltools=0.7.*
+  - cooler=0.10.*
+  - pandas=2.2.*

@@ -104,9 +104,6 @@ bash resources/download_resources.sh hg38
 
 # Download multiple assemblies
 bash resources/download_resources.sh hg38 mm10
-
-# Use more threads for faster indexing
-THREADS=16 bash resources/download_resources.sh hg38
 ```
 
 The script will tell you the exact paths to put in `config/genome.yaml`.
@@ -712,7 +709,7 @@ snakemake -s workflow/Snakefile --cores 8 export_oracle --configfile config/conf
 **Q: The `.pt` output file is 0 bytes. What happened?**
 
 PyTorch or PyTorch Geometric failed to import (usually a CUDA library mismatch).
-The pipeline writes an empty `.pt` and a manifest with `"torch_geometric": false, "error": "..."`.
+The pipeline now fails the export instead of writing an empty `.pt`.
 Check the log: `results/logs/export_oracle/<sample>.log`.
 
 For CPU-only machines, remove `pytorch-cuda` from `environment.yml` and rebuild

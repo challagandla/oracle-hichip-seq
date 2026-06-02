@@ -8,6 +8,7 @@ rule pairs_to_validpairs:
         pairs = RESULTS / "pairs/{sample}.dedup.pairs.gz"
     output:
         vpairs = RESULTS / "pairs/{sample}.allValidPairs"
+    conda: "../envs/coreutils.yaml"
     log:
         RESULTS / "logs/pairs_to_validpairs/{sample}.log"
     shell:
@@ -78,6 +79,7 @@ rule fithichip_run:
     output:
         loops = RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed"
     threads: config["threads"]["fithichip"]
+    conda: "../envs/fithichip.yaml"
     log:
         RESULTS / "logs/fithichip/{sample}.log"
     params:
@@ -124,6 +126,7 @@ rule mustache_crosscheck:
     params:
         res = config["fithichip"]["bin_size"]
     threads: 8
+    conda: "../envs/mustache.yaml"
     log:
         RESULTS / "logs/mustache/{sample}.log"
     shell:

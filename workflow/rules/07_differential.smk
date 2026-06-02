@@ -58,6 +58,7 @@ rule build_union_loops:
         loops = _loop_inputs_for_comparison
     output:
         bedpe = RESULTS / "diff/{comparison}/union_loops.bedpe"
+    conda: "../envs/coreutils.yaml"
     log:
         RESULTS / "logs/build_union/{comparison}.log"
     shell:
@@ -82,6 +83,7 @@ rule count_per_loop:
     params:
         res = config["fithichip"]["bin_size"]
     threads: 4
+    conda: "../envs/coolerpy.yaml"
     log:
         RESULTS / "logs/count_per_loop/{comparison}_{sample}.log"
     script:
@@ -103,6 +105,7 @@ rule differential_loops:
         fdr = config["differential"]["fdr"],
         log2fc_min = config["differential"]["log2fc_min"]
     threads: 8
+    conda: "../envs/pydeseq2.yaml"
     log:
         RESULTS / "logs/differential_loops/{comparison}.log"
     script:

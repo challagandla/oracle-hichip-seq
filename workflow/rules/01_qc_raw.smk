@@ -12,6 +12,7 @@ rule fastqc_raw:
     params:
         outdir = RESULTS / "qc/fastqc_raw"
     threads: config["threads"]["fastqc"]
+    conda: "../envs/qc.yaml"
     log:
         RESULTS / "logs/fastqc_raw/{sample}.log"
     shell:
@@ -23,7 +24,7 @@ rule fastqc_raw:
         R1_STEM=$(basename {input.r1}); R1_STEM=${{R1_STEM%.fastq.gz}}; R1_STEM=${{R1_STEM%.fq.gz}}; R1_STEM=${{R1_STEM%.fastq}}
         R2_STEM=$(basename {input.r2}); R2_STEM=${{R2_STEM%.fastq.gz}}; R2_STEM=${{R2_STEM%.fq.gz}}; R2_STEM=${{R2_STEM%.fastq}}
 
-        # Fail loudly — never use || true on output-producing steps
+        # Fail loudly; do not swallow output-producing step failures.
         test -f "{params.outdir}/${{R1_STEM}}_fastqc.html" || \
             {{ echo "ERROR: FastQC did not produce ${{R1_STEM}}_fastqc.html" >&2; exit 1; }}
         test -f "{params.outdir}/${{R2_STEM}}_fastqc.html" || \
@@ -53,6 +54,7 @@ rule fastp_trim:
         l   = config["fastp"]["length_required"],
         a1  = config["fastp"]["adapter_sequence"],
         a2  = config["fastp"]["adapter_sequence_r2"]
+    conda: "../envs/qc.yaml"
     log:
         RESULTS / "logs/fastp/{sample}.log"
     shell:

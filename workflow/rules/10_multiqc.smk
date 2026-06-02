@@ -14,14 +14,12 @@ rule multiqc_report:
     output:
         html = RESULTS / "multiqc/multiqc_report.html"
     params:
-        outdir = RESULTS / "multiqc",
-        searchdir = RESULTS
-    log:
-        RESULTS / "logs/multiqc/multiqc.log"
-    params:
         outdir    = RESULTS / "multiqc",
         searchdir = RESULTS,
         mqc_cfg   = "config/multiqc_config.yaml"
+    conda: "../envs/multiqc.yaml"
+    log:
+        RESULTS / "logs/multiqc/multiqc.log"
     shell:
         r"""
         multiqc -f \

@@ -1,0 +1,8 @@
+# FitHiChIP loop calling (stage 05)
+name: oracle-hichip-fithichip
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - fithichip

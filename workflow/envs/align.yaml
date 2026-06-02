@@ -1,0 +1,13 @@
+# Alignment + pair extraction/dedup (stages 02, 04)
+name: oracle-hichip-align
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - bwa=0.7.*
+  - bwa-mem2=2.2.*
+  - samtools=1.20.*
+  - pairtools=1.1.*
+  - pairix=0.3.*
+  - htslib=1.20.*

@@ -16,6 +16,7 @@
 #   10_multiqc         Aggregate MultiQC across all stages
 
 import os
+import re
 import yaml
 import pandas as pd
 from pathlib import Path
@@ -34,6 +35,7 @@ MARKS = sorted(SAMPLES["mark"].dropna().unique())
 
 RESULTS = Path(config["results_dir"])
 FITHICHIP_Q_LABEL = f"Q{config['fithichip']['fdr_threshold']}"
+ORACLE_BIN_SIZES_BP = [int(k) * 1000 for k in config["cooler"]["oracle_bin_sizes_kb"]]
 
 # convenience accessors used by rule files
 def fastq_r1(wc): return SAMPLES.loc[wc.sample, "fastq_r1"]
@@ -43,12 +45,21 @@ def fithichip_loop_path(sample):
     return RESULTS / f"loops/{sample}/{sample}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed"
 
 # ---------- Wildcard constraints ----------
+# `sample` and `region` both legitimately contain underscores (e.g. sample
+# "HCT_OV_001_R1", region "MYC_locus"), and several outputs join them as
+# "{sample}_{region}". Without exact-value constraints Snakemake cannot
+# unambiguously split that filename. Pin both to the known values so the
+# split is deterministic.
+VIZ_REGION_NAMES = [r["name"] for r in config["viz"]["regions"]]
+DIFF_COMPARISON_NAMES = [c["name"] for c in config.get("differential", {}).get("comparisons", [])]
+
 wildcard_constraints:
-    sample = r"[A-Za-z0-9_]+",
+    sample = "|".join(re.escape(s) for s in SAMPLE_IDS),
     res    = r"\d+",
     mark   = r"[A-Za-z0-9]+",
-    region = r"[A-Za-z0-9_\-]+",
-    comparison = r"[A-Za-z0-9_\-]+"
+    region = "|".join(re.escape(r) for r in VIZ_REGION_NAMES) or r"[A-Za-z0-9_\-]+",
+    comparison = ("|".join(re.escape(c) for c in DIFF_COMPARISON_NAMES)
+                  or r"[A-Za-z0-9_\-]+")
 
 # ---------- Include all rule files ----------
 include: "rules/01_qc_raw.smk"
@@ -63,8 +74,6 @@ include: "rules/09_export_oracle.smk"
 include: "rules/10_multiqc.smk"
 
 # ---------- Top-level targets ----------
-ORACLE_BIN_SIZES_BP = [int(k) * 1000 for k in config["cooler"]["oracle_bin_sizes_kb"]]
-
 rule all:
     input:
         # Per-sample core artefacts

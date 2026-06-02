@@ -53,7 +53,9 @@ dependencies:
   - hicexplorer=3.7.*
 
   # ----- Replicate / matrix QC -----
-  - hicreppy=0.1.*
+  # NB: the QC script imports the `hicrep` PyPI package API
+  # (`from hicrep import hicrepSCC`, `hicrep.utils.readMcool`), which is a
+  # DIFFERENT project from conda's `hicreppy`. Install `hicrep` via pip below.
   - pip
 
   # ----- Differential loops (R side fallback) -----
@@ -106,5 +108,6 @@ dependencies:
   # ----- pip-only -----
   - pip:
       - pyDESeq2==0.4.*
+      - hicrep                 # provides hicrepSCC + hicrep.utils.readMcool (used by hicrep_replicate_qc.py)
       - higlass-python==1.2.*
       - clodius

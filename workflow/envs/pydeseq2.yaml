@@ -1,0 +1,15 @@
+# Differential loop analysis with pyDESeq2 (stage 07)
+name: oracle-hichip-pydeseq2
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.11
+  - matplotlib=3.9.*
+  - numpy=1.26.*
+  - scipy=1.13.*
+  - pandas=2.2.*
+  - pip
+  - pip:
+      - pyDESeq2==0.4.*

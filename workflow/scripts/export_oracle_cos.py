@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -19,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
-from utils import load_loops_bedpe, read_chromsizes, setup_logging  # noqa: E402
+from utils import load_loops_bedpe, read_chromsizes, select_insulation_column, setup_logging  # noqa: E402
 
 
 def _bins_for_resolution(clr: cooler.Cooler, chroms: list[str]) -> pd.DataFrame:
@@ -51,6 +52,37 @@ def _peak_overlap_per_bin(bed_path: str | Path, bins: pd.DataFrame) -> np.ndarra
             out[idx[mask]] += 1.0
     bin_sizes = (bins["end"].values - bins["start"].values).astype(np.float32)
     return out / np.maximum(bin_sizes / 1000.0, 1.0)
+
+
+def _blacklist_mask_for_bins(blacklist_path: str | Path | None, bins: pd.DataFrame) -> np.ndarray:
+    """
+    Boolean mask (len == n bins) flagging bins that overlap an ENCODE blacklist
+    interval. Defensive: any failure (missing file, unreadable, malformed)
+    returns an all-False mask so export never breaks on the blacklist.
+    """
+    mask = np.zeros(len(bins), dtype=bool)
+    try:
+        if not blacklist_path or not str(blacklist_path):
+            return mask
+        p = Path(blacklist_path)
+        if not p.exists() or p.stat().st_size == 0:
+            return mask
+        bl = pd.read_csv(p, sep="\t", header=None, comment="#", usecols=[0, 1, 2],
+                         names=["chrom", "start", "end"])
+        for chrom, sub in bins.groupby("chrom"):
+            bl_c = bl[bl["chrom"].astype(str) == str(chrom)]
+            if bl_c.empty:
+                continue
+            starts = sub["start"].values
+            ends = sub["end"].values
+            idx = sub["bin_idx"].values
+            for s, e in zip(bl_c["start"].values, bl_c["end"].values):
+                hit = (starts < e) & (ends > s)
+                mask[idx[hit]] = True
+    except Exception as exc:  # never let blacklist handling break the export
+        logger = logging.getLogger(__name__)
+        logger.warning("Blacklist masking skipped (%s): %s", blacklist_path, exc)
+    return mask
 
 
 def _as_float(value, default: float) -> float:
@@ -136,7 +168,9 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     eigs = pd.read_csv(snakemake.input.eigs, sep="\t")
 
     sample_id = snakemake.wildcards.sample
+    blacklist_path = getattr(snakemake.params, "blacklist", "")
     micro_keys, micro_values = _load_global_tokens(snakemake.params.microbiome_tsv, sample_id)
+    n_blacklisted_bins: dict[str, int] = {}
 
     Path(snakemake.output.h5).parent.mkdir(parents=True, exist_ok=True)
     graphs: dict[str, dict] = {}
@@ -149,9 +183,16 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
 
         peak_overlap_count = _peak_overlap_per_bin(peaks, bins)
 
+        # Zero the peak-overlap feature for bins overlapping ENCODE blacklist
+        # regions — these produce mapping artefacts and spurious peak overlaps.
+        bl_mask = _blacklist_mask_for_bins(blacklist_path, bins)
+        if bl_mask.any():
+            peak_overlap_count[bl_mask] = 0.0
+        n_blacklisted_bins[f"res_{bp}"] = int(bl_mask.sum())
+
         ix = insul.copy()
         ix["start"] = (ix["start"] // bp) * bp
-        ix_col = "log2_insulation_score" if "log2_insulation_score" in ix.columns else ix.columns[-1]
+        ix_col = select_insulation_column(ix)
         ix = ix.groupby(["chrom", "start"], as_index=False)[ix_col].mean()
         eigs_b = eigs.copy()
         eigs_b["start"] = (eigs_b["start"] // bp) * bp
@@ -199,9 +240,11 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         import torch
         from torch_geometric.data import HeteroData
     except Exception as exc:
-        Path(snakemake.output.pt).write_bytes(b"")
-        Path(snakemake.output.manifest).write_text(json.dumps({"sample_id": sample_id, "torch_geometric": False, "error": str(exc)}, indent=2))
-        return
+        raise RuntimeError(
+            "PyTorch Geometric is required to create the ORACLE .pt output. "
+            "Install torch and torch_geometric, or change the Snakemake outputs "
+            "before running an HDF5-only export."
+        ) from exc
 
     data = HeteroData()
     data["sample"].id = sample_id
@@ -237,12 +280,17 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         "loop_qc":      _sha256(snakemake.input.loop_qc),
     }
 
+    blacklist_applied = bool(blacklist_path) and Path(str(blacklist_path)).exists()
     manifest = {
         "sample_id": sample_id,
         "resolutions_bp": bin_sizes_bp,
         "node_feature_channels": ["peak_overlap_count_per_kb", "insulation", "E1_eigenvector"],
         "edge_kinds": {"0": "adjacency", "1": "loop"},
         "edge_attr_channels": ["loop_score", "loop_fdr", "genomic_distance_bp"],
+        "blacklist": str(blacklist_path) if blacklist_path else None,
+        "blacklist_applied": blacklist_applied,
+        "blacklist_sha256": _sha256(str(blacklist_path)) if blacklist_applied else "NOT_APPLIED",
+        "n_blacklisted_bins_per_resolution": n_blacklisted_bins,
         "microbiome_keys": micro_keys,
         "scope_note": (
             "Prototype HiChIP COS export: peak-overlap count is not continuous per-mark "

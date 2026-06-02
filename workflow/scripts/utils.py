@@ -41,6 +41,35 @@ def read_chromsizes(path: str | Path) -> dict[str, int]:
     return sizes
 
 
+def select_insulation_column(df: pd.DataFrame) -> str:
+    """Return the score column from a cooltools insulation table."""
+    exact_names = ("log2_insulation_score", "insulation_score", "insulation")
+    for name in exact_names:
+        if name in df.columns:
+            return name
+
+    excluded_tokens = ("boundary", "is_boundary", "bad_bin", "valid_pixels", "n_valid")
+    prefixes = ("log2_insulation_score_", "insulation_score_", "insulation_")
+    for prefix in prefixes:
+        matches = [
+            col for col in df.columns
+            if str(col).lower().startswith(prefix)
+            and not any(token in str(col).lower() for token in excluded_tokens)
+        ]
+        if matches:
+            return matches[0]
+
+    matches = [
+        col for col in df.columns
+        if "insulation" in str(col).lower()
+        and not any(token in str(col).lower() for token in excluded_tokens)
+    ]
+    if matches:
+        return matches[0]
+
+    raise ValueError(f"Could not identify insulation score column. Columns: {list(df.columns)}")
+
+
 def load_loops_bedpe(path: str | Path) -> pd.DataFrame:
     """
     Load a FitHiChIP/generic/annotated BEDPE. Headered annotated BEDPE and

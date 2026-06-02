@@ -15,15 +15,17 @@ rule cooler_cload:
     output:
         cool = RESULTS / "cool/{sample}.base.cool"
     params:
-        binsize = BASE_BIN_BP
+        binsize = BASE_BIN_BP,
+        assembly = ASSEMBLY
     threads: config["threads"]["cooler"]
+    conda: "../envs/cooler.yaml"
     log:
         RESULTS / "logs/cooler_cload/{sample}.log"
     shell:
         r"""
         cooler cload pairix \
             --nproc {threads} \
-            --assembly {ASSEMBLY} \
+            --assembly {params.assembly} \
             {input.chromsizes}:{params.binsize} \
             {input.pairs} \
             {output.cool} 2> {log}
@@ -45,6 +47,7 @@ rule cooler_zoomify:
         min_nnz = config["cooler"]["balance"]["min_nnz"],
         mad_max = config["cooler"]["balance"]["mad_max"]
     threads: config["threads"]["cooler"]
+    conda: "../envs/cooler.yaml"
     log:
         RESULTS / "logs/cooler_zoomify/{sample}.log"
     shell:

@@ -6,6 +6,7 @@
 
 BWA_BIN = "bwa-mem2" if config["bwa"]["use_bwamem2"] else "bwa"
 BWA_IDX = GENOME["bwamem2_index"] if config["bwa"]["use_bwamem2"] else GENOME["bwa_index"]
+PAIRTOOLS_KEEP_EXPR = " or ".join(f'pair_type=="{pt}"' for pt in config["pairtools"]["keep_pair_types"])
 
 rule bwa_align_sort_pairs:
     """
@@ -26,6 +27,7 @@ rule bwa_align_sort_pairs:
         min_mapq = config["pairtools"]["min_mapq"],
         walks = config["pairtools"]["walks_policy"]
     threads: config["threads"]["bwa"]
+    conda: "../envs/align.yaml"
     log:
         RESULTS / "logs/bwa_pairs/{sample}.log"
     shell:
@@ -58,7 +60,8 @@ rule pairtools_dedup:
         unmapped = RESULTS / "pairs/{sample}.unmapped.pairs.gz"
     threads: config["threads"]["pairtools"]
     params:
-        keep_types = ",".join(config["pairtools"]["keep_pair_types"])
+        keep_expr = PAIRTOOLS_KEEP_EXPR
+    conda: "../envs/align.yaml"
     log:
         RESULTS / "logs/pairtools_dedup/{sample}.log"
     shell:
@@ -71,10 +74,10 @@ rule pairtools_dedup:
             --output {output.pairsam_dedup} \
             {input.pairsam} 2> {log}
 
-        # Step 2: keep only UU pairs and split to .pairs.gz
+        # Step 2: keep configured high-confidence pair types and split to .pairs.gz
         # NOTE: {output.pairsam_dedup} is used as INPUT here (already written above).
         # These are sequential shell commands — no parallelism issue.
-        pairtools select '(pair_type=="UU")' \
+        pairtools select '{params.keep_expr}' \
             --output-rest /dev/null \
             --output - \
             {output.pairsam_dedup} 2>> {log} | \
@@ -94,6 +97,7 @@ rule pairtools_stats:
     output:
         stats = RESULTS / "qc/pairtools/{sample}.pairs.stats.txt"
     threads: 1
+    conda: "../envs/align.yaml"
     log:
         RESULTS / "logs/pairtools_stats/{sample}.log"
     shell:

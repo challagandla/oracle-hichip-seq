@@ -118,6 +118,8 @@ viz:
 oracle_export:
   output_format: "pyg"                         # pyg | h5
   emit_bigwigs: true                           # reserved for future signal-channel expansion
-  blacklist_bed: "resources/hg38-blacklist.v2.bed.gz"
+  # The ENCODE blacklist is taken from config/genome.yaml (per-assembly `blacklist`),
+  # so it stays consistent with the chosen assembly. Bins overlapping blacklist
+  # regions have their peak-overlap node feature zeroed during COS export.
   microbiome_metadata_tsv: "config/microbiome_tokens.tsv"   # optional; one row per sample
   drop_chromosomes: ["chrM", "chrY"]
