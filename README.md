@@ -1,6 +1,6 @@
-# ORACLE HiChIP analysis pipeline
+# ORACLE HiChIP-Seq analysis pipeline
 
-End-to-end HiChIP processing — paired-end FASTQ in, ORACLE-ready Chromatin Operating System (COS) graph prototypes out, with comprehensive QC and publication-grade visualisation at every stage.
+End-to-end HiChIP processing; paired-end FASTQ in, ORACLE-ready Chromatin Operating System (COS) graph prototypes out, with comprehensive QC and publication-grade visualisation at every stage.
 
 > Component of the **ORACLE** research program (Onco-Regulatory Architecture and Chromatin Latent Engine). The proposal and foundation-model training code live in separate repositories.
 
