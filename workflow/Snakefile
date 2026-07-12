@@ -39,6 +39,16 @@ RESULTS = Path(config["results_dir"])
 FITHICHIP_Q_LABEL = f"Q{config['fithichip']['fdr_threshold']}"
 ORACLE_BIN_SIZES_BP = [int(k) * 1000 for k in config["cooler"]["oracle_bin_sizes_kb"]]
 
+# FitHiChIP names its output directories after the interaction type and bias model,
+# using these strings rather than the numeric codes it takes in the config. Deriving
+# them from the same codes keeps the path we read from in step with the config we
+# write -- FitHiChIP also builds an ALL2ALL directory while computing the background,
+# so reading the wrong one silently returns a different call set.
+_FITHICHIP_INT_DIRS = {1: "Peak2Peak", 2: "Peak2NonPeak", 3: "Peak2ALL", 4: "ALL2ALL"}
+_FITHICHIP_BIAS_DIRS = {1: "Coverage_Bias", 2: "ICE_Bias"}
+FITHICHIP_INT_DIR = _FITHICHIP_INT_DIRS[int(config["fithichip"]["int_type_code"])]
+FITHICHIP_BIAS_DIR = _FITHICHIP_BIAS_DIRS[int(config["fithichip"]["bias_type_code"])]
+
 # convenience accessors used by rule files
 def fastq_r1(wc): return SAMPLES.loc[wc.sample, "fastq_r1"]
 def fastq_r2(wc): return SAMPLES.loc[wc.sample, "fastq_r2"]

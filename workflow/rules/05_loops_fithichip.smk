@@ -137,16 +137,33 @@ rule fithichip_run:
     log:
         RESULTS / "logs/fithichip/{sample}.log"
     params:
-        q_label = FITHICHIP_Q_LABEL
+        q_label = FITHICHIP_Q_LABEL,
+        # The exact directory FitHiChIP writes the configured call set into. It is
+        # derived from the same config values that are written into the .config, so
+        # the two cannot drift apart.
+        result_dir = lambda wc: "/".join([
+            f"FitHiChIP_{FITHICHIP_INT_DIR}_b{config['fithichip']['bin_size']}"
+            f"_L{config['fithichip']['lower_distance']}"
+            f"_U{config['fithichip']['upper_distance']}",
+            f"P2PBckgr_{config['fithichip'].get('use_p2p_background', 1)}",
+            FITHICHIP_BIAS_DIR,
+            "FitHiC_BiasCorr",
+        ]) if config["fithichip"].get("use_p2p_background", 1) else "/".join([
+            f"FitHiChIP_{FITHICHIP_INT_DIR}_b{config['fithichip']['bin_size']}"
+            f"_L{config['fithichip']['lower_distance']}"
+            f"_U{config['fithichip']['upper_distance']}",
+            FITHICHIP_BIAS_DIR,
+            "FitHiC_BiasCorr",
+        ]),
     shell:
         r"""
         # Isolate the conda R from the host installation. ~/.Rprofile here runs
         # .libPaths("~/Rlibs"), which PREPENDS a library built against a different
         # R to the search path, and FitHiChIP's R steps (edgeR, ggplot2,
         # data.table, dplyr) then fail to load packages that are in fact installed
-        # in this environment. The profile is sourced on every R startup, so
-        # clearing R_LIBS_USER alone does not help — the profile runs after the
-        # environment is read.
+        # in this environment. Verified: without this, requireNamespace() is FALSE
+        # for all four inside the env that contains them. The profile is sourced on
+        # every R startup, so clearing R_LIBS_USER alone does not help.
         export R_PROFILE_USER=/dev/null
         export R_ENVIRON_USER=/dev/null
         export R_LIBS_USER=""
@@ -159,14 +176,28 @@ rule fithichip_run:
         # not exist on any channel.
         bash {input.script} -C {input.cfg} 2> {log}
 
-        # Normalise output path — FitHiChIP versions differ in subdirectory nesting
-        if [ ! -s {output.loops} ]; then
-            found=$(find "$(dirname {output.loops})" -type f \
-                    -name "*interactions_FitHiC_{params.q_label}.bed" | head -n 1)
+        outdir="$(dirname {output.loops})"
+
+        # Take the call set from the directory the configured interaction type and
+        # background actually write to. A `find -name "*interactions_FitHiC_*.bed"`
+        # across the whole sample tree is NOT safe: FitHiChIP also builds an
+        # ALL2ALL directory while computing the background model, so a wildcard can
+        # match a different call set than the one requested -- and `find` returns
+        # directory order, not sorted order, so which one it picked would vary
+        # between samples.
+        want="$outdir/{params.result_dir}/{wildcards.sample}.interactions_FitHiC_{params.q_label}.bed"
+        if [ -s "$want" ]; then
+            cp "$want" {output.loops}
+        else
+            # Fall back within the configured directory only, never outside it.
+            found=$(find "$outdir/{params.result_dir}" -type f \
+                    -name "*interactions_FitHiC_{params.q_label}.bed" 2>/dev/null | sort | head -n 1)
             if [ -n "$found" ]; then
                 cp "$found" {output.loops}
             else
-                echo "ERROR: FitHiChIP produced no output BED at q={params.q_label}" >&2
+                echo "ERROR: FitHiChIP produced no BED at q={params.q_label} under" >&2
+                echo "       $outdir/{params.result_dir}" >&2
+                echo "       (present: $(find "$outdir" -name '*interactions_FitHiC_*.bed' 2>/dev/null | tr '\n' ' '))" >&2
                 exit 1
             fi
         fi
