@@ -1,8 +1,25 @@
-sample_id	subject_id	tissue	disease	cancer_type	replicate	mark	fastq_r1	fastq_r2	batch	library_protocol	notes
-HCT_OV_001_R1	OV001	tumor	ovarian_HGSOC	ovarian	1	H3K27ac	data/fastq/HCT_OV_001_R1_R1.fastq.gz	data/fastq/HCT_OV_001_R1_R2.fastq.gz	2026Q2_A	HiChIP_v2	"deep-dive cohort"
-HCT_OV_001_R2	OV001	tumor	ovarian_HGSOC	ovarian	2	H3K27ac	data/fastq/HCT_OV_001_R2_R1.fastq.gz	data/fastq/HCT_OV_001_R2_R2.fastq.gz	2026Q2_A	HiChIP_v2	"deep-dive cohort"
-HCT_OV_001_K4M3	OV001	tumor	ovarian_HGSOC	ovarian	1	H3K4me3	data/fastq/HCT_OV_001_K4_R1.fastq.gz	data/fastq/HCT_OV_001_K4_R2.fastq.gz	2026Q2_A	HiChIP_v2	"deep-dive cohort"
-HPP_PBMC_S1234_K4M3	S1234	pbmc	healthy	NA	1	H3K4me3	data/fastq/HPP_PBMC_S1234_K4_R1.fastq.gz	data/fastq/HPP_PBMC_S1234_K4_R2.fastq.gz	2026Q2_B	CUT_Tag_HiChIP	"HPP pilot subject"
-HPP_PBMC_S1234_K27M3	S1234	pbmc	healthy	NA	1	H3K27me3	data/fastq/HPP_PBMC_S1234_K27_R1.fastq.gz	data/fastq/HPP_PBMC_S1234_K27_R2.fastq.gz	2026Q2_B	CUT_Tag_HiChIP	"HPP pilot subject"
-HPP_PBMC_S1234_K36M2	S1234	pbmc	healthy	NA	1	H3K36me2	data/fastq/HPP_PBMC_S1234_K36me2_R1.fastq.gz	data/fastq/HPP_PBMC_S1234_K36me2_R2.fastq.gz	2026Q2_B	CUT_Tag_HiChIP	"HPP pilot subject"
-HPP_PBMC_S1234_K36M3	S1234	pbmc	healthy	NA	1	H3K36me3	data/fastq/HPP_PBMC_S1234_K36me3_R1.fastq.gz	data/fastq/HPP_PBMC_S1234_K36me3_R2.fastq.gz	2026Q2_B	CUT_Tag_HiChIP	"HPP pilot subject"
+# HiChIP cohort: GSE101498 / PRJNA394682 (Mumbach et al., Nat Genet 2017,
+# "Enhancer connectome in primary human cells reveals target genes of
+# disease-associated DNA elements").
+#
+# Primary human CD4+ T-cell subsets, H3K27ac HiChIP, three biological replicates
+# per subset, plus CTCF HiChIP in naive cells as an architectural-anchor arm.
+#
+# `srr` holds one or more run accessions. Where a biological replicate was
+# sequenced as several technical replicates the runs are comma-separated, and
+# rules/00_fetch_sra.smk concatenates them into one library. Technical replicates
+# are the same library sequenced twice: merging them is correct, and carrying them
+# as separate rows would inflate n and understate the variance the differential
+# test has to beat.
+sample_id	srr	subject_id	cell_type	tissue	disease	cancer_type	replicate	mark	fastq_r1	fastq_r2	batch	library_protocol	notes
+Naive_H3K27ac_rep1	SRR5831496	donor1	Naive	cd4_t	healthy	NA	1	H3K27ac	data/fastq/Naive_H3K27ac_rep1_R1.fastq.gz	data/fastq/Naive_H3K27ac_rep1_R2.fastq.gz	GSE101498	HiChIP_MboI	"shallow, 12M pairs"
+Naive_H3K27ac_rep2	SRR5831497,SRR5831498	donor2	Naive	cd4_t	healthy	NA	2	H3K27ac	data/fastq/Naive_H3K27ac_rep2_R1.fastq.gz	data/fastq/Naive_H3K27ac_rep2_R2.fastq.gz	GSE101498	HiChIP_MboI	"2 technical replicates merged"
+Naive_H3K27ac_rep3	SRR5831499,SRR5831500	donor3	Naive	cd4_t	healthy	NA	3	H3K27ac	data/fastq/Naive_H3K27ac_rep3_R1.fastq.gz	data/fastq/Naive_H3K27ac_rep3_R2.fastq.gz	GSE101498	HiChIP_MboI	"2 technical replicates merged"
+Th17_H3K27ac_rep1	SRR5831501,SRR5831502	donor1	Th17	cd4_t	healthy	NA	1	H3K27ac	data/fastq/Th17_H3K27ac_rep1_R1.fastq.gz	data/fastq/Th17_H3K27ac_rep1_R2.fastq.gz	GSE101498	HiChIP_MboI	"2 technical replicates merged"
+Th17_H3K27ac_rep2	SRR5831503	donor2	Th17	cd4_t	healthy	NA	2	H3K27ac	data/fastq/Th17_H3K27ac_rep2_R1.fastq.gz	data/fastq/Th17_H3K27ac_rep2_R2.fastq.gz	GSE101498	HiChIP_MboI	""
+Th17_H3K27ac_rep3	SRR5831504	donor3	Th17	cd4_t	healthy	NA	3	H3K27ac	data/fastq/Th17_H3K27ac_rep3_R1.fastq.gz	data/fastq/Th17_H3K27ac_rep3_R2.fastq.gz	GSE101498	HiChIP_MboI	""
+Treg_H3K27ac_rep1	SRR5831505	donor1	Treg	cd4_t	healthy	NA	1	H3K27ac	data/fastq/Treg_H3K27ac_rep1_R1.fastq.gz	data/fastq/Treg_H3K27ac_rep1_R2.fastq.gz	GSE101498	HiChIP_MboI	"shallow, 31M pairs"
+Treg_H3K27ac_rep2	SRR5831506	donor2	Treg	cd4_t	healthy	NA	2	H3K27ac	data/fastq/Treg_H3K27ac_rep2_R1.fastq.gz	data/fastq/Treg_H3K27ac_rep2_R2.fastq.gz	GSE101498	HiChIP_MboI	""
+Treg_H3K27ac_rep3	SRR5831507	donor3	Treg	cd4_t	healthy	NA	3	H3K27ac	data/fastq/Treg_H3K27ac_rep3_R1.fastq.gz	data/fastq/Treg_H3K27ac_rep3_R2.fastq.gz	GSE101498	HiChIP_MboI	""
+Naive_CTCF_rep1	SRR5831508	donor1	Naive	cd4_t	healthy	NA	1	CTCF	data/fastq/Naive_CTCF_rep1_R1.fastq.gz	data/fastq/Naive_CTCF_rep1_R2.fastq.gz	GSE101498	HiChIP_MboI	"architectural anchor"
+Naive_CTCF_rep2	SRR5831509	donor2	Naive	cd4_t	healthy	NA	2	CTCF	data/fastq/Naive_CTCF_rep2_R1.fastq.gz	data/fastq/Naive_CTCF_rep2_R2.fastq.gz	GSE101498	HiChIP_MboI	"architectural anchor"

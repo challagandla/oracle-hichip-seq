@@ -4,12 +4,14 @@
 #   snakemake -s workflow/Snakefile --cores 32 --configfile config/config.yaml --use-conda
 #
 # Stages:
+#   00_fetch_sra       Download FASTQs from SRA (technical replicates merged)
 #   01_qc_raw          FastQC + fastp adapter/quality trim
 #   02_align_pairs     bwa-mem2 -SP5M + pairtools parse/sort/dedup → .pairs.gz
 #   03_cool_matrix     cooler load + zoomify + balance (ICE)
 #   04_peaks           Extract 1D reads, MACS2 narrow/broad peaks per mark
 #   05_loops_fithichip FitHiChIP Peak-to-ALL loop calling
 #   06_loop_qc         cis/trans, P(s), insulation, APA, HiCRep replicate QC
+#   06b_stripes        architectural stripe calling (Stripenn)
 #   07_differential    mark-stratified differential loops
 #   08_viz             pyGenomeTracks, APA plots, virtual 4C
 #   09_export_oracle   Multi-resolution COS graph + node features (PyG / .h5)
@@ -62,12 +64,14 @@ wildcard_constraints:
                   or r"[A-Za-z0-9_\-]+")
 
 # ---------- Include all rule files ----------
+include: "rules/00_fetch_sra.smk"
 include: "rules/01_qc_raw.smk"
 include: "rules/02_align_pairs.smk"
 include: "rules/03_cool_matrix.smk"
 include: "rules/04_peaks.smk"
 include: "rules/05_loops_fithichip.smk"
 include: "rules/06_loop_qc.smk"
+include: "rules/06b_stripes.smk"
 include: "rules/07_differential.smk"
 include: "rules/08_viz.smk"
 include: "rules/09_export_oracle.smk"
@@ -87,6 +91,11 @@ rule all:
         expand(RESULTS / "viz/{sample}_{region}.png",
                sample=SAMPLE_IDS,
                region=[r["name"] for r in config["viz"]["regions"]]),
+        # Architectural stripes
+        *( [RESULTS / "stripes/stripe_summary.tsv"] if config.get("stripes", {}).get("enabled") else [] ),
+        # Differential loops per comparison
+        expand(RESULTS / "diff/{comparison}/differential_loops.tsv",
+               comparison=[c["name"] for c in config.get("differential", {}).get("comparisons", [])]),
         # MultiQC aggregate report
         RESULTS / "multiqc/multiqc_report.html"
 
@@ -123,6 +132,10 @@ rule differential_all:
     input:
         expand(RESULTS / "diff/{comparison}/differential_loops.tsv",
                comparison=[c["name"] for c in config.get("differential", {}).get("comparisons", [])])
+
+rule stripes:
+    input:
+        RESULTS / "stripes/stripe_summary.tsv"
 
 rule multiqc:
     input:

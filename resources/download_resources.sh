@@ -51,16 +51,33 @@ index_reference() {
     local bwa_prefix="$2"
     local bwamem2_prefix="$3"
 
-    if command -v samtools >/dev/null 2>&1 && [[ ! -s "${fasta}.fai" ]]; then
+    # Say which indexer is missing rather than skipping in silence. A skipped index
+    # does not fail here — it fails hours later, inside the first alignment job,
+    # as a missing-input error that points at the index rather than at this script.
+    if ! command -v samtools >/dev/null 2>&1; then
+        echo "ERROR: samtools not on PATH; cannot faidx ${fasta}." >&2
+        exit 1
+    fi
+    if ! command -v bwa >/dev/null 2>&1 && ! command -v bwa-mem2 >/dev/null 2>&1; then
+        echo "ERROR: neither bwa nor bwa-mem2 on PATH; no aligner index can be built." >&2
+        echo "       Install one and rerun, or the alignment stage will fail." >&2
+        exit 1
+    fi
+
+    if [[ ! -s "${fasta}.fai" ]]; then
         samtools faidx "${fasta}"
     fi
 
     mkdir -p "$(dirname "${bwa_prefix}")" "$(dirname "${bwamem2_prefix}")"
     if command -v bwa >/dev/null 2>&1 && [[ ! -s "${bwa_prefix}.bwt" ]]; then
         bwa index -p "${bwa_prefix}" "${fasta}"
+    else
+        echo "note: skipping bwa index (bwa not on PATH or index present)."
     fi
     if command -v bwa-mem2 >/dev/null 2>&1 && [[ ! -s "${bwamem2_prefix}.0123" ]]; then
         bwa-mem2 index -p "${bwamem2_prefix}" "${fasta}"
+    else
+        echo "note: skipping bwa-mem2 index (bwa-mem2 not on PATH or index present)."
     fi
 }
 

@@ -17,9 +17,10 @@ threads:
   bwa: 24
   pairtools: 8
   cooler: 8
-  macs2: 4
+  macs3: 4
   fithichip: 16
   diffhic: 8
+  stripenn: 8
 
 # ---------- Read QC ----------
 fastp:
@@ -49,17 +50,30 @@ cooler:
     mad_max: 5
     cis_only: false
 
-# ---------- MACS2 peak calling (per histone mark) ----------
-macs2:
+# ---------- Anchor calling (MACS3, per mark) ----------
+# Anchors are called from the HiChIP library itself; no companion ChIP-seq needed.
+#
+# narrow vs broad follows the ENCODE histone spec. The one that is commonly got
+# wrong is H3K4me1: it is BROAD, despite marking enhancers, because its signal is
+# a wide bimodal shoulder around the nucleosome-depleted region rather than a
+# sharp peak. It was previously listed here as narrow.
+#
+# Acetylation and H3K4me3 are punctate and stay narrow — calling H3K27ac with
+# --broad fuses adjacent enhancers into multi-kb blocks, which for HiChIP is
+# actively harmful: the anchors are what loops are anchored on, so fused anchors
+# merge distinct enhancer-promoter contacts into one uninterpretable loop.
+macs3:
   genome_size: "hs"                            # hs | mm | dm | ce
   marks:
     H3K4me3:   { mode: "narrow", q: 0.01 }
-    H3K4me1:   { mode: "narrow", q: 0.01 }
+    H3K4me1:   { mode: "broad",  q: 0.05, broad_cutoff: 0.1 }
     H3K27ac:   { mode: "narrow", q: 0.01 }
     H3K27me3:  { mode: "broad",  q: 0.05, broad_cutoff: 0.1 }
     H3K36me2:  { mode: "broad",  q: 0.05, broad_cutoff: 0.1 }
     H3K36me3:  { mode: "broad",  q: 0.05, broad_cutoff: 0.1 }
     CTCF:      { mode: "narrow", q: 0.01 }
+    SMC1A:     { mode: "narrow", q: 0.01 }     # cohesin
+    RAD21:     { mode: "narrow", q: 0.01 }     # cohesin
 
 # ---------- FitHiChIP loop calling ----------
 fithichip:
@@ -98,21 +112,66 @@ differential:
   fdr: 0.05
   log2fc_min: 1.0
   method: "pyDESeq2"                           # pyDESeq2 | diffhic_r
-  comparisons: []
-  # Example once matched H3K27ac controls exist:
-  # comparisons:
-  #   - name: ovarian_tumor_vs_adjacent_H3K27ac
-  #     mark: H3K27ac
-  #     case_filter:    { tissue: tumor, disease: ovarian_HGSOC, library_protocol: HiChIP_v2 }
-  #     control_filter: { tissue: adjacent_normal, disease: non_cancer, library_protocol: HiChIP_v2 }
+  # CD4+ T-helper subsets, same mark (H3K27ac), same protocol, same donors.
+  # Th17 vs Treg is the substantive axis: the two subsets are developmentally
+  # adjacent and reciprocally polarising, and the autoimmune GWAS variants that
+  # motivate this dataset fall in enhancers whose target genes differ between
+  # them. Naive is the common ancestor and serves as the reference for both.
+  #
+  # CTCF is deliberately absent from every comparison. It exists in this cohort in
+  # naive cells only, so there is no contrast to make, and comparing loops called
+  # on a CTCF anchor set against loops called on an H3K27ac anchor set would
+  # compare anchor definitions rather than biology.
+  comparisons:
+    - name: Th17_vs_Naive_H3K27ac
+      mark: H3K27ac
+      case_filter:    { cell_type: Th17 }
+      control_filter: { cell_type: Naive }
+    - name: Treg_vs_Naive_H3K27ac
+      mark: H3K27ac
+      case_filter:    { cell_type: Treg }
+      control_filter: { cell_type: Naive }
+    - name: Th17_vs_Treg_H3K27ac
+      mark: H3K27ac
+      case_filter:    { cell_type: Th17 }
+      control_filter: { cell_type: Treg }
+
+# ---------- Architectural stripes ----------
+# Stripes (architectural / flame patterns) are the signature of one anchor
+# reeling in a whole domain by loop extrusion, and they are not recoverable from
+# a loop list: a loop caller tests discrete pixel pairs, whereas a stripe is a
+# continuous line of enrichment anchored at one end. Banecki et al. (Commun Biol
+# 2025) make stripe detection a first-class output of HiChIP analysis; this
+# pipeline previously had no equivalent.
+#
+# Read on a CTCF/cohesin anchor set they are directly interpretable as extrusion
+# anchors. On H3K27ac they are weaker and are reported, not leaned on.
+stripes:
+  enabled: true
+  resolution: 10000                             # 10 kb; 5 kb is too sparse per-pixel
+  max_pixel_pval: 0.1
+  min_length: 20000                             # ignore sub-2-bin nubs
+  max_width: 100000
+  canny_sigma: 2.0
 
 # ---------- Visualisation regions of interest ----------
+# The loci that decide whether the experiment worked. For CD4 T-helper subsets
+# these are the lineage-defining genes: if the Th17 enhancer connectome does not
+# differ from Treg at RORC/IL17A and Treg does not differ from Th17 at
+# FOXP3/IL2RA/CTLA4, then either the cells were not polarised or the HiChIP
+# failed, and nothing else in the analysis is worth reading. MYC is the shared
+# positive control — it is looped in every T cell.
+#
+# Coordinates are the GENCODE v46 gene body padded by 500 kb, generated from the
+# GTF rather than typed by hand.
 viz:
   regions:
-    - { name: "MYC_locus",   chrom: "chr8",  start: 126500000, end: 129500000 }
-    - { name: "BCL2_locus",  chrom: "chr18", start: 60500000,  end: 63500000 }
-    - { name: "NSD1_locus",  chrom: "chr5",  start: 176000000, end: 177500000 }
-    - { name: "PPARG_locus", chrom: "chr3",  start: 12200000,  end: 12550000 }
+    - { name: "RORC_locus",  chrom: "chr1",  start: 151306071, end: 152331845 }  # Th17 master TF
+    - { name: "IL17A_locus", chrom: "chr6",  start: 51686375,  end: 52690638 }   # Th17 effector
+    - { name: "FOXP3_locus", chrom: "chrX",  start: 48750438,  end: 49764800 }   # Treg master TF
+    - { name: "IL2RA_locus", chrom: "chr10", start: 5510689,   end: 6562370 }    # Treg, CD25
+    - { name: "CTLA4_locus", chrom: "chr2",  start: 203353888, end: 204373965 }  # Treg effector
+    - { name: "MYC_locus",   chrom: "chr8",  start: 127235434, end: 128242951 }  # shared control
 
 # ---------- ORACLE COS export ----------
 oracle_export:
