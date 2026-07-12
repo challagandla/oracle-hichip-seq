@@ -8,6 +8,16 @@
 #
 # MACS3, not MACS2: see envs/macs3.yaml. MACS2's bioconda build no longer
 # loads on current glibc.
+#
+# Anchors are called with -f BAM, NOT -f BAMPE, and this is the substantive point
+# of the stage. The two ends of a HiChIP pair are ligation partners — they sit
+# megabases apart, or on different chromosomes, because that is the contact the
+# assay is measuring. They are not the two ends of one sonicated fragment. Asking
+# MACS to read them as a pair asks it to treat the ligation distance as a fragment
+# length; MACS3 refuses outright (ZeroDivisionError building the PE track, having
+# found no valid fragment). Each read end is therefore counted on its own and
+# extended to a nucleosome, which is what FitHiChIP's own peak inference does
+# (`--nomodel --extsize 147`).
 
 rule pairs_to_1d_bam:
     """
@@ -60,6 +70,7 @@ rule macs3_peaks:
         macs_out = RESULTS / "peaks/raw/{sample}_peaks_macs.done"
     params:
         gsize = config["macs3"]["genome_size"],
+        extsize = config["macs3"].get("extsize", 147),
         # Per-rule flattened scalars — avoids dict-subscript fragility in shell
         mode = _macs3_mode,
         qval = _macs3_q,
@@ -71,22 +82,34 @@ rule macs3_peaks:
         RESULTS / "logs/macs3/{sample}.log"
     shell:
         r"""
+        set -euo pipefail
         mkdir -p {params.outdir}
 
+        # Read ends as a BED of individual tags. MACS3's own BAM reader returns
+        # zero tags from this BAM (it then dies dividing by the tag count), and
+        # -f BED is in any case the input FitHiChIP's peak inference uses, so the
+        # anchors here and the anchors FitHiChIP would infer are defined the same
+        # way.
+        reads={params.outdir}/{wildcards.sample}.reads.bed
+        bedtools bamtobed -i {input.bam} > $reads 2> {log}
+
         if [ "{params.mode}" = "broad" ]; then
-            macs3 callpeak -t {input.bam} -f BAMPE -g {params.gsize} \
+            macs3 callpeak -t $reads -f BED -g {params.gsize} \
                 --outdir {params.outdir} -n {wildcards.sample} \
                 --broad --broad-cutoff {params.broad_cutoff} -q {params.qval} \
-                --nomodel 2> {log}
+                --nomodel --extsize {params.extsize} 2>> {log}
             cut -f1-3 {params.outdir}/{wildcards.sample}_peaks.broadPeak | \
                 sort -k1,1 -k2,2n > {output.bed}
         else
-            macs3 callpeak -t {input.bam} -f BAMPE -g {params.gsize} \
+            macs3 callpeak -t $reads -f BED -g {params.gsize} \
                 --outdir {params.outdir} -n {wildcards.sample} -q {params.qval} \
-                --nomodel 2> {log}
+                --nomodel --extsize {params.extsize} 2>> {log}
             cut -f1-3 {params.outdir}/{wildcards.sample}_peaks.narrowPeak | \
                 sort -k1,1 -k2,2n > {output.bed}
         fi
 
+        rm -f $reads
+        test -s {output.bed}
+        echo "{wildcards.sample}: $(wc -l < {output.bed}) anchors" >> {log}
         touch {output.macs_out}
         """

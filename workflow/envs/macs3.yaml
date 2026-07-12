@@ -14,3 +14,4 @@ channels:
 dependencies:
   - macs3=3.0.*
   - numpy<2
+  - bedtools=2.31.*   # read ends -> BED; MACS3's BAM reader returns 0 tags here

@@ -64,6 +64,12 @@ cooler:
 # merge distinct enhancer-promoter contacts into one uninterpretable loop.
 macs3:
   genome_size: "hs"                            # hs | mm | dm | ce
+  # HiChIP read ends are ligation partners, not the two ends of one sonicated
+  # fragment: they routinely sit megabases apart or on different chromosomes. So
+  # the anchors are called from the read ends treated INDIVIDUALLY, each extended
+  # to a nucleosome, rather than as pairs. FitHiChIP's own peak inference does the
+  # same (`--nomodel --extsize 147`).
+  extsize: 147
   marks:
     H3K4me3:   { mode: "narrow", q: 0.01 }
     H3K4me1:   { mode: "broad",  q: 0.05, broad_cutoff: 0.1 }
