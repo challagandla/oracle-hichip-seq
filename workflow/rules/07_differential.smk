@@ -63,8 +63,12 @@ rule build_union_loops:
         RESULTS / "logs/build_union/{comparison}.log"
     shell:
         r"""
+        # FitHiChIP writes a text header row (chr1 s1 e1 chr2 s2 e2 ...), which is
+        # not a comment, so filtering on /^#/ alone lets it through into the BEDPE.
+        # Require numeric coordinates instead.
         cat {input.loops} | \
-            awk 'BEGIN{{OFS="\t"}} !/^#/ {{print $1,$2,$3,$4,$5,$6}}' | \
+            awk 'BEGIN{{OFS="\t"}} !/^#/ && $2 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/ \
+                 {{print $1,$2,$3,$4,$5,$6}}' | \
             sort -k1,1 -k2,2n -k4,4 -k5,5n | uniq > {output.bedpe} 2> {log}
         test -s {output.bedpe}
         """
