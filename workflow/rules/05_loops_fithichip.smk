@@ -135,6 +135,18 @@ rule fithichip_run:
         q_label = FITHICHIP_Q_LABEL
     shell:
         r"""
+        # Isolate the conda R from the host installation. ~/.Rprofile here runs
+        # .libPaths("~/Rlibs"), which PREPENDS a library built against a different
+        # R to the search path, and FitHiChIP's R steps (edgeR, ggplot2,
+        # data.table, dplyr) then fail to load packages that are in fact installed
+        # in this environment. The profile is sourced on every R startup, so
+        # clearing R_LIBS_USER alone does not help — the profile runs after the
+        # environment is read.
+        export R_PROFILE_USER=/dev/null
+        export R_ENVIRON_USER=/dev/null
+        export R_LIBS_USER=""
+        export R_LIBS_SITE=""
+
         # FitHiChIP is not a conda package, so there is no binary to look for on
         # PATH — it is the release fetched by fithichip_install. The previous
         # version of this rule probed for a `fithichip` executable and, failing
