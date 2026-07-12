@@ -138,23 +138,19 @@ rule fithichip_run:
         RESULTS / "logs/fithichip/{sample}.log"
     params:
         q_label = FITHICHIP_Q_LABEL,
-        # The exact directory FitHiChIP writes the configured call set into. It is
-        # derived from the same config values that are written into the .config, so
-        # the two cannot drift apart.
-        result_dir = lambda wc: "/".join([
-            f"FitHiChIP_{FITHICHIP_INT_DIR}_b{config['fithichip']['bin_size']}"
-            f"_L{config['fithichip']['lower_distance']}"
-            f"_U{config['fithichip']['upper_distance']}",
-            f"P2PBckgr_{config['fithichip'].get('use_p2p_background', 1)}",
-            FITHICHIP_BIAS_DIR,
-            "FitHiC_BiasCorr",
-        ]) if config["fithichip"].get("use_p2p_background", 1) else "/".join([
-            f"FitHiChIP_{FITHICHIP_INT_DIR}_b{config['fithichip']['bin_size']}"
-            f"_L{config['fithichip']['lower_distance']}"
-            f"_U{config['fithichip']['upper_distance']}",
-            FITHICHIP_BIAS_DIR,
-            "FitHiC_BiasCorr",
-        ]),
+        # The exact directory and file FitHiChIP writes the configured call set into,
+        # derived from the same config values written into the .config so the path we
+        # read cannot drift from the run we asked for.
+        result_dir = FITHICHIP_RESULT_DIR,
+        # Formatted here, not left as a literal: Snakemake does not expand wildcards
+        # inside a params string.
+        result_file = lambda wc: FITHICHIP_RESULT_FILE.format(sample=wc.sample),
+        want_desc = (
+            "Merged call set: adjacent significant bin pairs collapsed into one "
+            "contact (fithichip.merge_nearby)."
+            if FITHICHIP_MERGE else
+            "Raw call set: one physical loop may appear as several adjacent bin pairs."
+        ),
     shell:
         r"""
         # Isolate the conda R from the host installation. ~/.Rprofile here runs
@@ -168,6 +164,11 @@ rule fithichip_run:
         export R_ENVIRON_USER=/dev/null
         export R_LIBS_USER=""
         export R_LIBS_SITE=""
+
+        # Same hazard on the Python side: FitHiChIP runs python scripts, and
+        # ~/.local/lib/python*/site-packages is searched ahead of the environment.
+        # A stale numpy there is what broke the sibling ChIP-seq pipeline.
+        export PYTHONNOUSERSITE=1
 
         # FitHiChIP is not a conda package, so there is no binary to look for on
         # PATH — it is the release fetched by fithichip_install. The previous
@@ -185,21 +186,16 @@ rule fithichip_run:
         # match a different call set than the one requested -- and `find` returns
         # directory order, not sorted order, so which one it picked would vary
         # between samples.
-        want="$outdir/{params.result_dir}/{wildcards.sample}.interactions_FitHiC_{params.q_label}.bed"
+        #
+        # {params.want_desc}
+        want="$outdir/{params.result_dir}/{params.result_file}"
         if [ -s "$want" ]; then
             cp "$want" {output.loops}
         else
-            # Fall back within the configured directory only, never outside it.
-            found=$(find "$outdir/{params.result_dir}" -type f \
-                    -name "*interactions_FitHiC_{params.q_label}.bed" 2>/dev/null | sort | head -n 1)
-            if [ -n "$found" ]; then
-                cp "$found" {output.loops}
-            else
-                echo "ERROR: FitHiChIP produced no BED at q={params.q_label} under" >&2
-                echo "       $outdir/{params.result_dir}" >&2
-                echo "       (present: $(find "$outdir" -name '*interactions_FitHiC_*.bed' 2>/dev/null | tr '\n' ' '))" >&2
-                exit 1
-            fi
+            echo "ERROR: FitHiChIP produced no BED at q={params.q_label} at" >&2
+            echo "       $want" >&2
+            echo "       (present: $(find "$outdir" -name '*interactions_FitHiC_*.bed' 2>/dev/null | tr '\n' ' '))" >&2
+            exit 1
         fi
         test -s {output.loops}
         """

@@ -95,6 +95,17 @@ fithichip:
   bias_type_code: 1                             # coverage-bias correction
   use_p2p_background: 1
   min_reads: 6                                  # downstream reporting threshold
+  # Take the merged call set. FitHiChIP writes TWO results: the raw significant bin
+  # pairs, and -- under Merge_Nearby_Interactions/ -- the same set with adjacent
+  # significant bin pairs collapsed into one contact. The raw set reports one
+  # physical loop several times, once per adjacent bin pair it spans. Measured on
+  # Th17_H3K27ac_rep1: 30,903 raw against 17,875 merged, so 42% of the raw calls are
+  # redundant. Feeding the raw set to the differential test inflates the loop count
+  # and enters the same interaction into DESeq2 repeatedly.
+  #
+  # Setting MergeInt=1 alone is NOT enough -- that only makes FitHiChIP write the
+  # merged file; you have to read it.
+  merge_nearby: true
 
 # ---------- Replicate QC ----------
 # Replicates are same cell type, same mark, different donor (see rules/06_loop_qc.smk).

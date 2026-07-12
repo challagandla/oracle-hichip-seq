@@ -2,21 +2,27 @@
 Count valid pairs supporting each union loop, per sample, from the unbalanced
 cooler at the FitHiChIP bin size.
 
-Two things this has to get right.
+Each loop is counted over the full rectangle of bins its two anchors span, not over
+the single bin containing `start`.
 
-Anchors are not one bin wide. FitHiChIP runs with MergeInt=1, which merges
-adjacent significant bins into one interaction, so an anchor is routinely 2-4
-bins across. Counting only the bin containing `start` samples a fraction of each
-loop's actual footprint, and that fraction is larger for wide anchors than for
-narrow ones -- i.e. it tracks ChIP enrichment, which is exactly what differs
-between the groups being compared, so it would enter DESeq2 as a
-group-correlated bias. Each loop is therefore counted over the full rectangle of
-bins its two anchors span.
+On FitHiChIP 11.0 those are the same thing. Checked against a real call set: every
+anchor is exactly one bin wide, including in the merged output -- the merge step
+picks a representative bin pair rather than widening the anchor. An earlier version
+of this comment claimed anchors were "routinely 2-4 bins across"; that was wrong,
+and the 22% figure that went with it came from synthetic anchors, not from anything
+FitHiChIP emits.
 
-The counting is done with one streaming pass over the pixel table rather than a
-cooler .fetch() per loop. A union set here is O(10^5) loops and every .fetch() is
-an indexed HDF5 range read; per-loop fetching costs hours per sample, whereas the
-pixel table can be read linearly once.
+The rectangle is kept anyway, because the union BEDPE is not required to come from
+FitHiChIP. Any caller that emits a wider anchor -- mustache, a lifted-over published
+loop set, a merged consensus across resolutions -- would otherwise be counted on an
+arbitrary fraction of its own footprint, and that fraction scales with anchor width,
+which scales with ChIP enrichment, which is what differs between the groups being
+compared. That is a group-correlated bias rather than noise, and it is silent.
+
+The load-bearing part is the counting method: one streaming pass over the pixel
+table instead of a cooler .fetch() per loop. A union set is O(10^5) loops and each
+.fetch() is an indexed HDF5 range read, so per-loop fetching costs hours per sample;
+the pixel table is read linearly once.
 """
 from __future__ import annotations
 

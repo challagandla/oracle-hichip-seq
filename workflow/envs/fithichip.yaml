@@ -42,3 +42,10 @@ dependencies:
   - r-rcolorbrewer
   - bioconductor-genomicranges
   - bioconductor-edger
+  # FitHiChIP shells out to bedToBigBed to write browser tracks. It is not a
+  # FitHiChIP dependency in any conda sense, so without it here the call falls
+  # through PATH to whatever the host has -- here /home/epigenetics/.local/bin,
+  # whose copy dies on a missing libpng12.so.0. Loop calling itself survives
+  # (exit 0, the interactions BED is written), but the tracks are never produced,
+  # and it is the same failure mode as the host ~/.Rprofile shadowing the env's R.
+  - ucsc-bedtobigbed

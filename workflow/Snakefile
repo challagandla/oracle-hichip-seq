@@ -48,6 +48,32 @@ _FITHICHIP_INT_DIRS = {1: "Peak2Peak", 2: "Peak2NonPeak", 3: "Peak2ALL", 4: "ALL
 _FITHICHIP_BIAS_DIRS = {1: "Coverage_Bias", 2: "ICE_Bias"}
 FITHICHIP_INT_DIR = _FITHICHIP_INT_DIRS[int(config["fithichip"]["int_type_code"])]
 FITHICHIP_BIAS_DIR = _FITHICHIP_BIAS_DIRS[int(config["fithichip"]["bias_type_code"])]
+FITHICHIP_MERGE = bool(config["fithichip"].get("merge_nearby", True))
+
+_fc = config["fithichip"]
+_FITHICHIP_BASE = (
+    f"FitHiChIP_{FITHICHIP_INT_DIR}_b{_fc['bin_size']}"
+    f"_L{_fc['lower_distance']}_U{_fc['upper_distance']}"
+)
+# The P2PBckgr_<n> level only exists when the peak-to-peak background is in use.
+_FITHICHIP_PARTS = [_FITHICHIP_BASE]
+if _fc.get("use_p2p_background", 1):
+    _FITHICHIP_PARTS.append(f"P2PBckgr_{_fc['use_p2p_background']}")
+_FITHICHIP_PARTS += [FITHICHIP_BIAS_DIR, "FitHiC_BiasCorr"]
+
+# FitHiChIP emits BOTH a raw call set and, under Merge_Nearby_Interactions/, the same
+# set with adjacent significant bin pairs collapsed into one contact. The raw set
+# reports a single physical loop once per adjacent bin pair it spans -- 30,903 raw
+# against 17,875 merged on Th17_H3K27ac_rep1, i.e. 42% redundant. Setting MergeInt=1
+# only makes FitHiChIP WRITE the merged file; it still has to be the one read.
+if FITHICHIP_MERGE:
+    _FITHICHIP_PARTS.append("Merge_Nearby_Interactions")
+    FITHICHIP_RESULT_FILE = (
+        "{sample}.interactions_FitHiC_" + FITHICHIP_Q_LABEL + "_MergeNearContacts.bed"
+    )
+else:
+    FITHICHIP_RESULT_FILE = "{sample}.interactions_FitHiC_" + FITHICHIP_Q_LABEL + ".bed"
+FITHICHIP_RESULT_DIR = "/".join(_FITHICHIP_PARTS)
 
 # convenience accessors used by rule files
 def fastq_r1(wc): return SAMPLES.loc[wc.sample, "fastq_r1"]
