@@ -44,8 +44,8 @@ rule fastp_trim:
         r1 = fastq_r1,
         r2 = fastq_r2
     output:
-        r1 = RESULTS / "trimmed/{sample}_R1.trim.fastq.gz",
-        r2 = RESULTS / "trimmed/{sample}_R2.trim.fastq.gz",
+        r1 = temp(RESULTS / "trimmed/{sample}_R1.trim.fastq.gz"),
+        r2 = temp(RESULTS / "trimmed/{sample}_R2.trim.fastq.gz"),
         json = RESULTS / "qc/fastp/{sample}.fastp.json",
         html = RESULTS / "qc/fastp/{sample}.fastp.html"
     threads: config["threads"]["fastp"]

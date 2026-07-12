@@ -19,7 +19,11 @@ rule bwa_align_sort_pairs:
         r2 = RESULTS / "trimmed/{sample}_R2.trim.fastq.gz",
         chromsizes = GENOME["chromsizes"]
     output:
-        pairsam = RESULTS / "pairs/{sample}.sorted.pairsam.gz"
+        # temp(): this is consumed by pairtools_dedup and never read again. At
+        # ~0.15 GB per million pairs it is the single largest thing the workflow
+        # writes — across 2.15 billion pairs it would be ~500 GB of files whose
+        # only consumer has already finished with them.
+        pairsam = temp(RESULTS / "pairs/{sample}.sorted.pairsam.gz")
     params:
         idx = BWA_IDX,
         bwa = BWA_BIN,
