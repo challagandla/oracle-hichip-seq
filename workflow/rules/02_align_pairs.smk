@@ -59,9 +59,15 @@ rule pairtools_dedup:
         pairsam = RESULTS / "pairs/{sample}.sorted.pairsam.gz"
     output:
         pairs = RESULTS / "pairs/{sample}.dedup.pairs.gz",
-        pairsam_dedup = RESULTS / "pairs/{sample}.dedup.pairsam.gz",
+        # 18.6 GB per library, and its only consumer is pairs_to_1d_bam (stage 04).
+        # Once the 1D BAM exists nothing reads it again, so holding it costs ~205 GB
+        # across this cohort for nothing.
+        pairsam_dedup = temp(RESULTS / "pairs/{sample}.dedup.pairsam.gz"),
         stats = RESULTS / "qc/pairtools/{sample}.dedup.stats.txt",
-        unmapped = RESULTS / "pairs/{sample}.unmapped.pairs.gz"
+        # 12.6 GB per library and consumed by NO rule at all -- ~139 GB of pure
+        # byproduct. The unmapped *count* is what QC actually wants, and that is
+        # already in {output.stats}.
+        unmapped = temp(RESULTS / "pairs/{sample}.unmapped.pairs.gz")
     threads: config["threads"]["pairtools"]
     params:
         keep_expr = PAIRTOOLS_KEEP_EXPR
