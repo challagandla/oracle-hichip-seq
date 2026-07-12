@@ -1,8 +1,44 @@
 # FitHiChIP loop calling (stage 05)
+#
+# FitHiChIP is NOT on bioconda. `- fithichip` was declared here and resolves from
+# no channel, so the loop caller — the step every loop in this pipeline depends
+# on — could never be installed and the rule's own error message told the user to
+# `mamba install -c bioconda fithichip`, which cannot work.
+#
+# It is distributed as a GitHub release of shell + R + python scripts. What we pin
+# here is its dependency set (from the upstream Dockerfile at tag 11.0); the
+# workflow fetches the pinned release itself.
+#
+# MACS2 is deliberately absent although the upstream Dockerfile installs it:
+# FitHiChIP only shells out to MACS2 when asked to call peaks itself, and we hand
+# it a PeakFile. Adding it would install a binary that cannot even load on current
+# glibc (see envs/macs3.yaml) for no benefit.
 name: oracle-hichip-fithichip
 channels:
   - conda-forge
   - bioconda
   - nodefaults
 dependencies:
-  - fithichip
+  - python=3.10
+  - numpy<2
+  - scipy
+  - networkx
+  - pysam
+  - bx-python
+  - cooler=0.9.*
+  - bedtools=2.31.*
+  - samtools=1.20.*
+  - htslib=1.20.*
+  - bc
+  - gawk
+  - curl
+  - r-base=4.3.*
+  - r-optparse
+  - r-ggplot2
+  - r-data.table
+  - r-fdrtool
+  - r-plyr
+  - r-dplyr
+  - r-rcolorbrewer
+  - bioconductor-genomicranges
+  - bioconductor-edger

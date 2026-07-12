@@ -49,6 +49,14 @@ rule stripenn_call:
         set -euo pipefail
         mkdir -p {params.outdir} $(dirname {log})
 
+        # Put the environment's own libraries ahead of the host's. stripenn pulls
+        # the opencv-python wheel, whose cv2 .so needs a newer libstdc++ than the
+        # system provides and carries no RPATH back into the env, so the loader
+        # falls through to /lib/x86_64-linux-gnu and dies on a missing CXXABI
+        # version. Same failure mode as a host ~/.Rprofile or ~/.local numpy
+        # shadowing a conda environment: the env is correct, the search order is not.
+        export LD_LIBRARY_PATH="${{CONDA_PREFIX}}/lib${{LD_LIBRARY_PATH:+:${{LD_LIBRARY_PATH}}}}"
+
         stripenn compute \
             --cool {input.mcool}::/resolutions/{params.res} \
             --out {params.outdir}/ \

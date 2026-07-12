@@ -1,6 +1,44 @@
 # Stage 05 — FitHiChIP loop calling (Peak-to-ALL by default)
-# FitHiChIP correctly models 1D ChIP bias via spline regression. Run per-sample
-# at the configured bin size.
+# FitHiChIP models the 1D ChIP bias via spline regression, which is what makes a
+# HiChIP loop call different from a Hi-C one: contact frequency between two
+# anchors is inflated simply because both are enriched in the ChIP, and without
+# correcting for that the top "loops" are just the strongest peaks.
+#
+# FitHiChIP is not distributed through conda. It is a GitHub release of shell + R
+# + python scripts, so the pinned release is fetched here and its dependencies
+# come from envs/fithichip.yaml.
+
+
+FITHICHIP_VERSION = "11.0"
+FITHICHIP_DIR = RESULTS / f"tools/FitHiChIP-{FITHICHIP_VERSION}"
+
+
+rule fithichip_install:
+    """Fetch the pinned FitHiChIP release.
+
+    Pinned to a tag, not master: FitHiChIP's config keys and output directory
+    nesting have both changed between versions, and this workflow writes the
+    former and parses the latter.
+    """
+    output:
+        script = FITHICHIP_DIR / "FitHiChIP_HiCPro.sh",
+    params:
+        url = f"https://github.com/ay-lab/FitHiChIP/archive/refs/tags/{FITHICHIP_VERSION}.tar.gz",
+        dest = lambda wc, output: str(Path(output.script).parent),
+    conda: "../envs/fithichip.yaml"
+    log:
+        RESULTS / "logs/fithichip/install.log",
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p {params.dest} $(dirname {log})
+        curl -L --fail --retry 3 "{params.url}" -o {params.dest}/src.tar.gz > {log} 2>&1
+        tar -xzf {params.dest}/src.tar.gz -C {params.dest} --strip-components=1 >> {log} 2>&1
+        rm -f {params.dest}/src.tar.gz
+        chmod +x {output.script}
+        test -s {output.script}
+        echo "FitHiChIP installed to {params.dest}" >> {log}
+        """
 
 rule pairs_to_validpairs:
     """Convert pairtools .pairs.gz to HiC-Pro-style .allValidPairs for FitHiChIP."""
@@ -47,25 +85,35 @@ rule fithichip_config:
     run:
         outdir = Path(params.outdir)
         outdir.mkdir(parents=True, exist_ok=True)
+        # Key set follows FitHiChIP 11.0's own configfile. The previous template
+        # carried Draw / TimeProf / HiCProBasedir, which 11.0 does not read, and
+        # omitted MergeInt, which it does: with MergeInt unset, adjacent
+        # significant bins are reported as separate loops instead of being merged
+        # into one contact, which inflates the loop count and double-counts the
+        # same interaction in the differential test downstream.
         text = f"""
 # Auto-generated FitHiChIP config for sample {wildcards.sample}
 # interaction_type={params.itype}; background_type={params.bgtype}
 ValidPairs={input.pairs}
-PeakFile={input.peaks}
+Interval=
+Matrix=
+Bed=
+HIC=
+COOL=
 ChrSizeFile={input.chromsizes}
+PeakFile={input.peaks}
 OutDir={outdir}/
+CircularGenome=0
 IntType={params.int_code}
 BINSIZE={params.bin_size}
 LowDistThr={params.lower}
 UppDistThr={params.upper}
-QVALUE={params.fdr}
-HiCProBasedir=
-PREFIX={wildcards.sample}
-Draw=1
-TimeProf=1
-OverWrite=1
 UseP2PBackgrnd={params.use_p2p}
 BiasType={params.bias_code}
+MergeInt=1
+QVALUE={params.fdr}
+PREFIX={wildcards.sample}
+OverWrite=1
 """.lstrip()
         Path(output.cfg).write_text(text)
 
@@ -75,7 +123,8 @@ rule fithichip_run:
     FDR threshold.
     """
     input:
-        cfg = RESULTS / "loops/{sample}/fithichip.config"
+        cfg = RESULTS / "loops/{sample}/fithichip.config",
+        script = FITHICHIP_DIR / "FitHiChIP_HiCPro.sh",
     output:
         loops = RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed"
     threads: config["threads"]["fithichip"]
@@ -86,19 +135,12 @@ rule fithichip_run:
         q_label = FITHICHIP_Q_LABEL
     shell:
         r"""
-        # FitHiChIP ships two front-ends depending on installation method:
-        #   bioconda package  →  `fithichip --cfg <file>`
-        #   legacy shell      →  `FitHiChIP_HiCPro.sh -C <file>`
-        # We prefer the bioconda entrypoint; fall back to the shell script.
-        if command -v fithichip >/dev/null 2>&1; then
-            fithichip --cfg {input.cfg} 2> {log}
-        elif command -v FitHiChIP_HiCPro.sh >/dev/null 2>&1; then
-            FitHiChIP_HiCPro.sh -C {input.cfg} 2> {log}
-        else
-            echo "ERROR: neither 'fithichip' nor 'FitHiChIP_HiCPro.sh' found in PATH." >&2
-            echo "Install with: mamba install -c bioconda fithichip" >&2
-            exit 1
-        fi
+        # FitHiChIP is not a conda package, so there is no binary to look for on
+        # PATH — it is the release fetched by fithichip_install. The previous
+        # version of this rule probed for a `fithichip` executable and, failing
+        # that, told the user to `mamba install -c bioconda fithichip`, which does
+        # not exist on any channel.
+        bash {input.script} -C {input.cfg} 2> {log}
 
         # Normalise output path — FitHiChIP versions differ in subdirectory nesting
         if [ ! -s {output.loops} ]; then
