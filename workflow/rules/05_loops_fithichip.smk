@@ -40,25 +40,27 @@ rule fithichip_install:
         echo "FitHiChIP installed to {params.dest}" >> {log}
         """
 
-rule pairs_to_validpairs:
-    """Convert pairtools .pairs.gz to HiC-Pro-style .allValidPairs for FitHiChIP."""
-    input:
-        pairs = RESULTS / "pairs/{sample}.dedup.pairs.gz"
-    output:
-        vpairs = RESULTS / "pairs/{sample}.allValidPairs"
-    conda: "../envs/coreutils.yaml"
-    log:
-        RESULTS / "logs/pairs_to_validpairs/{sample}.log"
-    shell:
-        r"""
-        # pairtools .pairs columns with read IDs retained are:
-        # readID chrom1 pos1 chrom2 pos2 strand1 strand2 pair_type ...
-        # FitHiChIP needs the first seven HiC-Pro-like validPairs columns:
-        # readID chr1 pos1 strand1 chr2 pos2 strand2
-        zcat {input.pairs} | awk 'BEGIN{{OFS="\t"}} \
-            !/^#/ {{ print $1, $2, $3, $6, $4, $5, $7 }}' \
-            > {output.vpairs} 2> {log}
-        """
+# The `ValidPairs=` input path is a dead end and is deliberately not used.
+#
+# FitHiChIP 11.0 only accepts validPairs if it can build the contact matrix and bin
+# interval files from them, and it does that by shelling out to HiC-Pro:
+#
+#   if [[ -z $InpCoolFile && -z $InpHiCFile && -z $InpInitialInteractionBedFile ]]; then
+#       if [[ -z $InpBinIntervalFile || -z $InpMatrixFile ]]; then
+#           HiCProExec=`which HiC-Pro`
+#           if [[ -z $HiCProExec ]]; then
+#               echo 'ERROR ===>>>> HiC-pro is not installed ... FitHiChIP quits !!!'
+#
+# HiC-Pro is not installed, is not on bioconda, and is the legacy stack this
+# pipeline exists to avoid. Feeding FitHiChIP validPairs therefore made it quit
+# before calling a single loop, for every sample.
+#
+# We already build the matrix with cooler, so it is handed over directly:
+# `COOL=` takes the 5 kb single-resolution `{sample}.base.cool`, and FitHiChIP reads
+# it with `cooler dump -t pixels --join`. It must be the plain .cool file, not an
+# `.mcool::/resolutions/5000` URI -- FitHiChIP validates the path with `[ ! -f ... ]`,
+# which a URI fails.
+
 
 rule fithichip_config:
     """
@@ -66,7 +68,7 @@ rule fithichip_config:
     numeric codes, so those are explicit in config.yaml and written here.
     """
     input:
-        pairs = RESULTS / "pairs/{sample}.allValidPairs",
+        cool = RESULTS / "cool/{sample}.base.cool",
         peaks = RESULTS / "peaks/{sample}_peaks.bed",
         chromsizes = GENOME["chromsizes"]
     output:
@@ -94,12 +96,15 @@ rule fithichip_config:
         text = f"""
 # Auto-generated FitHiChIP config for sample {wildcards.sample}
 # interaction_type={params.itype}; background_type={params.bgtype}
-ValidPairs={input.pairs}
+#
+# COOL, not ValidPairs: the validPairs path makes FitHiChIP shell out to HiC-Pro to
+# build the matrix, and quit when it is absent. cooler already built it.
+ValidPairs=
 Interval=
 Matrix=
 Bed=
 HIC=
-COOL=
+COOL={Path(input.cool).resolve()}
 ChrSizeFile={input.chromsizes}
 PeakFile={input.peaks}
 OutDir={outdir}/
