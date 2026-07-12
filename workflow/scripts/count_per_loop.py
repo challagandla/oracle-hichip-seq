@@ -49,21 +49,10 @@ def _anchor_bins(clr: cooler.Cooler, chrom: str, start, end, res: int) -> np.nda
     return offset + np.arange(lo, hi, dtype=np.int64)
 
 
-def main(snakemake) -> None:  # type: ignore[no-untyped-def]
-    setup_logging(snakemake.log[0])
-
-    res = int(snakemake.params.res)
-    clr = cooler.Cooler(f"{snakemake.input.mcool}::resolutions/{res}")
-    loops = load_loops_bedpe(snakemake.input.bedpe).reset_index(drop=True)
-
-    out = loops.copy()
+def count_loops(clr: cooler.Cooler, loops: pd.DataFrame, res: int) -> np.ndarray:
+    """Pairs supporting each loop, summed over the full rectangle its anchors span."""
     if loops.empty:
-        out["count"] = pd.Series(dtype="int64")
-        out["sample"] = snakemake.wildcards.sample
-        Path(snakemake.output.counts).parent.mkdir(parents=True, exist_ok=True)
-        out.to_csv(snakemake.output.counts, sep="\t", index=False)
-        log.warning("union BEDPE is empty; wrote an empty count table")
-        return
+        return np.zeros(0, dtype=np.int64)
 
     n_bins = int(clr.info["nbins"])
     known = set(clr.chromnames)
@@ -118,6 +107,27 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         agg = matched.merge(wanted, on="key", how="inner").groupby("loop")["count"].sum()
         counts[agg.index.to_numpy()] += agg.to_numpy(dtype=np.int64)
 
+    return counts
+
+
+def main(snakemake) -> None:  # type: ignore[no-untyped-def]
+    setup_logging(snakemake.log[0])
+
+    res = int(snakemake.params.res)
+    clr = cooler.Cooler(f"{snakemake.input.mcool}::resolutions/{res}")
+    loops = load_loops_bedpe(snakemake.input.bedpe).reset_index(drop=True)
+
+    out = loops.copy()
+    if loops.empty:
+        out["count"] = pd.Series(dtype="int64")
+        out["sample"] = snakemake.wildcards.sample
+        Path(snakemake.output.counts).parent.mkdir(parents=True, exist_ok=True)
+        out.to_csv(snakemake.output.counts, sep="\t", index=False)
+        log.warning("union BEDPE is empty; wrote an empty count table")
+        return
+
+    counts = count_loops(clr, loops, res)
+
     out["count"] = counts
     out["sample"] = snakemake.wildcards.sample
     log.info("sample=%s loops=%d nonzero=%d total_pairs=%d",
@@ -127,4 +137,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     out.to_csv(snakemake.output.counts, sep="\t", index=False)
 
 
-main(snakemake)  # type: ignore[name-defined]  # noqa: F821
+# Guarded so the module can be imported by the tests. Snakemake injects `snakemake`
+# into the script's globals before executing it; nothing else does.
+if "snakemake" in globals():
+    main(snakemake)  # type: ignore[name-defined]  # noqa: F821

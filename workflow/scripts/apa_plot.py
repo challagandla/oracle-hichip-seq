@@ -1,9 +1,21 @@
 """
 Aggregate Peak Analysis (APA) on a HiChIP loop set.
 
-For each loop, extract a square of the contact matrix centred on the loop
-and aggregate (mean) across all loops. Compare to N random-shift controls.
-APA score = centre / mean(corners). Score ≥ 1.5 → good loops.
+For each loop, extract a square of the contact matrix centred on the loop and
+average across loops. The centre pixel is then compared against two backgrounds:
+
+  apa_vs_random_shift  centre / centre of a random-shift control, where BOTH
+                       anchors move by the same offset so the loop's genomic
+                       separation is preserved. This is the score that decides
+                       pass/fail -- it is distance-matched by construction.
+  apa_score            centre / the two window corners that sit at the same
+                       genomic separation as the centre. Reported for
+                       comparability with published APA numbers.
+
+Contact frequency inside the window is a function of distance from the diagonal:
+a pixel (i, j) lies at separation D + (j - i) * bin_size. So corners at different
+(j - i) are not interchangeable, and averaging all four -- as this did -- puts a
+corner that is 2 * win * bin_size CLOSER to the diagonal into the denominator.
 """
 from __future__ import annotations
 
@@ -142,4 +154,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     }, snakemake.output.json)
 
 
-main(snakemake)  # type: ignore[name-defined]  # noqa: F821
+# Guarded so the module can be imported by the tests. Snakemake injects
+# `snakemake` into the script's globals before executing it.
+if "snakemake" in globals():
+    main(snakemake)  # type: ignore[name-defined]  # noqa: F821

@@ -66,7 +66,11 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     valid_yield = (pair_stats.get("total_nodups", 0.0) / total * 100.0) if total else 0.0
     dup_pct = (total_dups / max(total, 1)) * 100.0
     cis_frac = cis / max(pair_stats.get("total_nodups", 1), 1)
-    apa_score = apa.get("apa_score")
+    # Gate on the random-shift APA, the same number apa_plot decides `pass` on.
+    # Reading apa_score here instead would have graded the sample on the corner
+    # ratio while APA itself graded it on the distance-matched control, so the two
+    # could disagree about the same library.
+    apa_score = apa.get("apa_vs_random_shift")
     hicrep_mean = hicrep.get("mean_scc")
 
     pass_flags = {
@@ -127,4 +131,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     Path(snakemake.output.md).write_text("\n".join(md_lines))
 
 
-main(snakemake)  # type: ignore[name-defined]  # noqa: F821
+# Guarded so the module can be imported by the tests. Snakemake injects
+# `snakemake` into the script's globals before executing it.
+if "snakemake" in globals():
+    main(snakemake)  # type: ignore[name-defined]  # noqa: F821
