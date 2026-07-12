@@ -58,8 +58,29 @@ def _colour(cell_type: str) -> str:
 
 
 def _panel_label(ax, letter: str) -> None:
-    ax.text(-0.18, 1.06, letter, transform=ax.transAxes,
+    ax.text(-0.22, 1.06, letter, transform=ax.transAxes,
             fontsize=10, fontweight="bold", va="bottom", ha="left")
+
+
+def _short(sample: str) -> str:
+    """Naive_H3K27ac_rep1 -> 'Naive K27ac r1'.
+
+    Full sample ids are long enough that, rotated 90 degrees, they take more of the
+    panel than the data does.
+    """
+    s = str(sample).replace("H3K27ac", "K27ac").replace("H3K4me3", "K4me3")
+    s = s.replace("H3K4me1", "K4me1").replace("H3K27me3", "K27me3")
+    return s.replace("_rep", " r").replace("_", " ")
+
+
+def _label_axis(ax, samples, axis: str = "x") -> None:
+    labels = [_short(s) for s in samples]
+    if axis == "x":
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels, rotation=90, fontsize=5)
+    else:
+        ax.set_yticks(range(len(labels)))
+        ax.set_yticklabels(labels, fontsize=5)
 
 
 def _empty(ax, msg: str) -> None:
@@ -128,13 +149,15 @@ def _library_table(samples: pd.DataFrame, results: Path, min_contacts: int) -> p
 
 # ---------------------------------------------------------------- figure 1
 def figure1_library_qc(lib: pd.DataFrame, results: Path, out: Path, min_contacts: int) -> None:
-    fig = plt.figure(figsize=(7.2, 5.0))
-    gs = fig.add_gridspec(2, 2, hspace=0.45, wspace=0.30)
+    fig = plt.figure(figsize=(7.2, 6.4))
+    # Generous hspace: the sample labels are rotated 90 degrees under panels a and c,
+    # and at the default spacing they run into the title of the panel below.
+    gs = fig.add_gridspec(2, 2, hspace=1.05, wspace=0.45)
 
     # (a) unique pairs, with the depth floor drawn on
     ax = fig.add_subplot(gs[0, 0]); _panel_label(ax, "a")
-    d = lib.sort_values("unique_pairs", ascending=False)
-    if d["unique_pairs"].notna().any():
+    d = lib.dropna(subset=["unique_pairs"]).sort_values("unique_pairs", ascending=False)
+    if len(d):
         colours = [_colour(c) for c in d["cell_type"]]
         bars = ax.bar(range(len(d)), d["unique_pairs"] / 1e6, color=colours,
                       edgecolor="black", linewidth=0.3)
@@ -143,11 +166,11 @@ def figure1_library_qc(lib: pd.DataFrame, results: Path, out: Path, min_contacts
                 bars[i].set_hatch("///")
                 bars[i].set_edgecolor("#b00020")
         ax.axhline(min_contacts / 1e6, ls="--", lw=0.7, c="#b00020")
-        ax.text(len(d) - 0.4, min_contacts / 1e6 * 1.08,
-                f"{min_contacts/1e6:.0f}M usability floor", fontsize=5,
-                c="#b00020", ha="right")
-        ax.set_xticks(range(len(d)))
-        ax.set_xticklabels(d.index, rotation=90)
+        # Annotate above the axes, not inside them: the line sits low on a log axis
+        # and the label lands on top of the tick labels.
+        ax.text(0.99, 1.01, f"{min_contacts/1e6:.0f}M usability floor",
+                transform=ax.transAxes, fontsize=5, c="#b00020", ha="right", va="bottom")
+        _label_axis(ax, d.index, axis="x")
         ax.set_ylabel("unique pairs (millions)")
         ax.set_yscale("log")
         ax.set_title("Library depth", loc="left")
@@ -156,13 +179,13 @@ def figure1_library_qc(lib: pd.DataFrame, results: Path, out: Path, min_contacts
 
     # (b) duplication
     ax = fig.add_subplot(gs[0, 1]); _panel_label(ax, "b")
-    if lib["dup_pct"].notna().any():
-        d = lib.sort_values("dup_pct")
+    d = lib.dropna(subset=["dup_pct"]).sort_values("dup_pct")
+    if len(d):
         ax.barh(range(len(d)), d["dup_pct"],
                 color=[_colour(c) for c in d["cell_type"]],
                 edgecolor="black", linewidth=0.3)
         ax.axvline(50, ls="--", lw=0.7, c="#b00020")
-        ax.set_yticks(range(len(d))); ax.set_yticklabels(d.index)
+        _label_axis(ax, d.index, axis="y")
         ax.set_xlabel("PCR duplicates (%)")
         ax.set_title("Library complexity", loc="left")
     else:
@@ -170,14 +193,14 @@ def figure1_library_qc(lib: pd.DataFrame, results: Path, out: Path, min_contacts
 
     # (c) cis fraction — the single best HiChIP sanity metric
     ax = fig.add_subplot(gs[1, 0]); _panel_label(ax, "c")
-    if lib["cis_pct"].notna().any():
-        d = lib.sort_values("cis_pct", ascending=False)
+    d = lib.dropna(subset=["cis_pct"]).sort_values("cis_pct", ascending=False)
+    if len(d):
         ax.bar(range(len(d)), d["cis_pct"],
                color=[_colour(c) for c in d["cell_type"]],
                edgecolor="black", linewidth=0.3)
         ax.axhline(70, ls="--", lw=0.7, c="#b00020")
         ax.set_ylim(0, 100)
-        ax.set_xticks(range(len(d))); ax.set_xticklabels(d.index, rotation=90)
+        _label_axis(ax, d.index, axis="x")
         ax.set_ylabel("cis contacts (%)")
         ax.set_title("Cis / trans ratio", loc="left")
     else:
@@ -218,6 +241,15 @@ def figure1_library_qc(lib: pd.DataFrame, results: Path, out: Path, min_contacts
 
     fig.suptitle("Figure 1 · HiChIP library and contact-map quality", x=0.02,
                  ha="left", fontsize=9, fontweight="bold")
+    # Colour is the only thing distinguishing cell types in panels a-c, so the key
+    # belongs on the figure rather than inside one panel that may render empty.
+    key = [Line2D([0], [0], color=c, lw=4, label=k)
+           for k, c in PALETTE.items() if k in set(lib["cell_type"])]
+    key.append(Line2D([0], [0], color="white", markerfacecolor="white",
+                      markeredgecolor="#b00020", marker="s", markersize=7,
+                      lw=0, label="below depth floor (hatched)"))
+    fig.legend(handles=key, frameon=False, ncol=len(key), fontsize=6,
+               loc="upper right", bbox_to_anchor=(0.99, 1.0))
     _save(fig, out)
 
 
@@ -230,8 +262,8 @@ def figure2_reproducibility(lib: pd.DataFrame, results: Path, out: Path) -> None
     cohort-wide matrix without inviting exactly the misreading it is prone to.
     Compartment E1 at 100 kb is robust to depth and separates cell types.
     """
-    fig = plt.figure(figsize=(7.2, 3.0))
-    gs = fig.add_gridspec(1, 2, wspace=0.35, width_ratios=[1.15, 1])
+    fig = plt.figure(figsize=(7.6, 3.6))
+    gs = fig.add_gridspec(1, 2, wspace=0.5, width_ratios=[1.2, 1])
 
     # (a) E1 correlation across all libraries
     ax = fig.add_subplot(gs[0, 0]); _panel_label(ax, "a")
@@ -256,8 +288,8 @@ def figure2_reproducibility(lib: pd.DataFrame, results: Path, out: Path) -> None
         E = pd.DataFrame(eigs).dropna()
         C = E.corr(method="pearson")
         im = ax.imshow(C.values, cmap="RdBu_r", vmin=-1, vmax=1)
-        ax.set_xticks(range(len(C))); ax.set_xticklabels(C.columns, rotation=90)
-        ax.set_yticks(range(len(C))); ax.set_yticklabels(C.index)
+        _label_axis(ax, C.columns, axis="x")
+        _label_axis(ax, C.index, axis="y")
         for i in range(len(C)):
             for j in range(len(C)):
                 ax.text(j, i, f"{C.values[i, j]:.2f}", ha="center", va="center",
@@ -312,8 +344,8 @@ def figure2_reproducibility(lib: pd.DataFrame, results: Path, out: Path) -> None
 
 # ---------------------------------------------------------------- figure 3
 def figure3_loops(lib: pd.DataFrame, results: Path, out: Path) -> None:
-    fig = plt.figure(figsize=(7.2, 4.6))
-    gs = fig.add_gridspec(2, 3, hspace=0.55, wspace=0.4)
+    fig = plt.figure(figsize=(7.6, 5.4))
+    gs = fig.add_gridspec(2, 3, hspace=1.0, wspace=0.45)
 
     # (a) loop counts
     ax = fig.add_subplot(gs[0, 0]); _panel_label(ax, "a")
@@ -322,7 +354,7 @@ def figure3_loops(lib: pd.DataFrame, results: Path, out: Path) -> None:
         ax.bar(range(len(d)), d["n_loops"],
                color=[_colour(c) for c in d["cell_type"]],
                edgecolor="black", linewidth=0.3)
-        ax.set_xticks(range(len(d))); ax.set_xticklabels(d.index, rotation=90)
+        _label_axis(ax, d.index, axis="x")
         ax.set_ylabel("significant loops")
         ax.set_title("FitHiChIP loops", loc="left")
     else:
@@ -478,8 +510,8 @@ def figure5_stripes(lib: pd.DataFrame, results: Path, out: Path) -> None:
     the expected result -- not a failure. The figure is split by mark so the two are
     never averaged together.
     """
-    fig = plt.figure(figsize=(7.2, 2.8))
-    gs = fig.add_gridspec(1, 3, wspace=0.4)
+    fig = plt.figure(figsize=(7.6, 3.4))
+    gs = fig.add_gridspec(1, 3, wspace=0.45)
 
     stripes: dict[str, pd.DataFrame] = {}
     for sid in lib.index:
@@ -500,7 +532,7 @@ def figure5_stripes(lib: pd.DataFrame, results: Path, out: Path) -> None:
         cols = ["#8172B2" if lib.loc[s, "mark"] == "CTCF" else "#CCB974" for s in counts.index]
         ax.bar(range(len(counts)), counts.values, color=cols,
                edgecolor="black", linewidth=0.3)
-        ax.set_xticks(range(len(counts))); ax.set_xticklabels(counts.index, rotation=90)
+        _label_axis(ax, counts.index, axis="x")
         ax.set_ylabel("stripes")
         ax.set_title("Stripe count", loc="left")
         ax.legend(handles=[
