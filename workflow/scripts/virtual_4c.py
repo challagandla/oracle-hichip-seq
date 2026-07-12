@@ -26,18 +26,26 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
 
     clr = cooler.Cooler(f"{snakemake.input.mcool}::resolutions/{res}")
 
-    # Identify the viewpoint bin index
+    # Identify the viewpoint bin
     bins = clr.bins().fetch(chrom).reset_index(drop=True)
     bin_row = bins[(bins["start"] <= mid) & (bins["end"] > mid)]
     if bin_row.empty:
         raise RuntimeError(f"No bin contains midpoint {mid} on {chrom}")
-    bin_idx = int(bin_row.index[0])
+    vp_start = int(bin_row["start"].iloc[0])
+    vp_end = int(bin_row["end"].iloc[0])
 
-    # Pull the row of contacts from the viewpoint to every bin on chrom
-    mat = clr.matrix(balance=True).fetch(chrom)
-    profile = np.nan_to_num(mat[bin_idx, :], nan=0.0).astype(float)
+    # Fetch ONLY the viewpoint row against the chromosome, never the whole
+    # chromosome. fetch(chrom) returns a dense n x n array: chr1 at 5 kb is ~49,700
+    # bins, so that single call asks for ~20 GB of RAM to read one row out of it,
+    # and several viz jobs run concurrently.
+    row = clr.matrix(balance=True).fetch((chrom, vp_start, vp_end), chrom)
+    profile = np.nan_to_num(np.asarray(row, dtype=float).ravel(), nan=0.0)
     starts = bins["start"].to_numpy(dtype=np.int64)
     ends = bins["end"].to_numpy(dtype=np.int64)
+    if profile.size != starts.size:
+        raise RuntimeError(
+            f"virtual 4C profile has {profile.size} values for {starts.size} bins on {chrom}"
+        )
 
     # Write a bigWig of the v4C profile (chrom-restricted header is fine)
     bw = pyBigWig.open(str(snakemake.output.bw), "w")

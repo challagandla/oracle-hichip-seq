@@ -92,6 +92,12 @@ rule all:
         expand(RESULTS / "viz/{sample}_{region}.png",
                sample=SAMPLE_IDS,
                region=[r["name"] for r in config["viz"]["regions"]]),
+        # Virtual 4C from each locus viewpoint. The rule existed but was reachable
+        # from no target, so it never ran -- and it is the view that shows an
+        # enhancer looking at its target gene, which is the point of the cohort.
+        expand(RESULTS / "viz/virtual_4c/{sample}_{region}.v4c.png",
+               sample=SAMPLE_IDS,
+               region=[r["name"] for r in config["viz"]["regions"]]),
         # Architectural stripes
         *( [RESULTS / "stripes/stripe_summary.tsv"] if config.get("stripes", {}).get("enabled") else [] ),
         # Differential loops per comparison
