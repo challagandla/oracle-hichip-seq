@@ -42,7 +42,7 @@ A condensed checklist. Treat each numbered item as a non-negotiable unless expli
 ## 1D peak calling
 
 18. Call peaks from `pairtools split` 1D reads, not from a separate ChIP-seq aliquot — the protein-of-interest immunoprecipitation is implicit in HiChIP.
-19. Use narrow mode for promoter/enhancer marks (H3K27ac, H3K4me3, H3K4me1, CTCF), broad mode for spreading marks (H3K27me3, H3K36me2, H3K36me3).
+19. Use narrow mode for punctate marks (H3K27ac, H3K4me3, CTCF, cohesin), broad mode for spreading marks (H3K27me3, H3K36me2, H3K36me3) — and for **H3K4me1**, which is broad per ENCODE despite marking enhancers: its signal is a wide bimodal shoulder around the nucleosome-depleted region, not a sharp peak. Getting this wrong matters more in HiChIP than in ChIP-seq: anchors are what loops are hung on, so calling a punctate mark with `--broad` fuses adjacent enhancers into multi-kb blocks and merges distinct enhancer–promoter contacts into one uninterpretable loop.
 20. Q-value 0.01 for narrow, 0.05 for broad. Document any deviation.
 
 ## Loop calling

@@ -141,7 +141,7 @@ OV_tumor_K27ac_R2 OV001       tumor    ovarian_HGSOC     2          H3K27ac  dat
 | `tissue` | ✅ | Tissue type (e.g. `tumor`, `pbmc`, `cortex`) |
 | `disease` | ✅ | Disease label (or `healthy`) |
 | `replicate` | ✅ | Integer replicate number within subject + mark |
-| `mark` | ✅ | Histone mark or factor (e.g. `H3K27ac`, `CTCF`). Must match a key in `config.yaml:macs2.marks` |
+| `mark` | ✅ | Histone mark or factor (e.g. `H3K27ac`, `CTCF`). Must match a key in `config.yaml:macs3.marks` |
 | `fastq_r1` | ✅ | Path to R1 FASTQ (absolute or relative to repo root) |
 | `fastq_r2` | ✅ | Path to R2 FASTQ |
 | `batch` | ✅ | Sequencing batch label; used to detect batch effects in differential analysis |
@@ -170,8 +170,8 @@ threads:
   bwa: 24           # set to the number of cores on your alignment node
   fithichip: 16
 
-# 4. Check MACS2 genome size
-macs2:
+# 4. Check MACS3 genome size
+macs3:
   genome_size: "hs"   # hs for human, mm for mouse
 
 # 5. Leave differential.comparisons empty until you have matched controls
@@ -218,7 +218,7 @@ snakemake -s workflow/Snakefile --cores 32 --configfile config/config.yaml --rer
 | `qc_raw` | FastQC + fastp reports |
 | `align_pairs` | Trimmed FASTQs → `.pairs.gz` |
 | `cool_matrix` | `.mcool` contact matrices |
-| `peaks` | MACS2 1D peak BEDs |
+| `peaks` | MACS3 1D peak BEDs |
 | `loops_fithichip` | FitHiChIP loop BEDs |
 | `loop_qc` | Per-sample QC JSON summaries |
 | `export_oracle` | ORACLE `.pt` + `.h5` graph files |
@@ -313,7 +313,7 @@ results/cool/<sample>.mcool       ← all resolutions, balanced
 
 **What it does**:
 1. Splits the deduped pairsam back to a 1D BAM (both read ends)
-2. Runs **MACS2** to call peaks in narrow mode (H3K27ac, H3K4me3, CTCF)
+2. Runs **MACS3** to call peaks in narrow mode (H3K27ac, H3K4me3, CTCF)
    or broad mode (H3K27me3, H3K36me2, H3K36me3)
 
 **Why call peaks from the HiChIP reads themselves?**
@@ -496,7 +496,7 @@ System (COS) graph format for foundation-model training.
 Nodes  = genomic bins at 5 kb / 25 kb / 100 kb / 1 Mb
 Edges  = FitHiChIP loop contacts + genomic adjacency edges
 Node features (current prototype):
-  [0] peak_overlap_count_per_kb  — MACS2 peak overlap, normalised by bin size
+  [0] peak_overlap_count_per_kb  — MACS3 peak overlap, normalised by bin size
   [1] insulation                 — cooltools insulation score
   [2] E1_eigenvector             — A/B compartment eigenvector
 Edge features:
@@ -506,7 +506,7 @@ Edge features:
 ```
 
 > ⚠️ **`peak_overlap_count_per_kb` is a prototype feature**.
-> It counts how many MACS2 peak intervals overlap each bin — it is NOT continuous
+> It counts how many MACS3 peak intervals overlap each bin — it is NOT continuous
 > per-mark ChIP/CUT&Tag signal. Full ORACLE COS will merge continuous bigWig tracks
 > from sister ATAC/CUT&Tag/RNA pipelines.
 
@@ -571,12 +571,14 @@ results/
 │   ├── hicrep/           ← replicate concordance JSON
 │   └── loop_qc/          ← aggregated QC JSON + Markdown per sample
 ├── pairs/                ← pairtools .pairs.gz + pairsam
-├── bam_1d/               ← 1D BAM for MACS2
+├── bam_1d/               ← 1D BAM for MACS3
 ├── cool/                 ← .base.cool and .mcool matrices
-├── peaks/                ← MACS2 peak BEDs
+├── peaks/                ← MACS3 peak BEDs
 ├── loops/                ← FitHiChIP + mustache loop BEDs
+├── stripes/              ← stripenn architectural stripes + summary
 ├── diff/                 ← differential loop results
 ├── viz/                  ← pyGenomeTracks figures + virtual 4C
+├── figures/              ← cohort publication figures (PDF + PNG)
 ├── oracle_cos/           ← ORACLE .pt / .h5 / manifest.json
 └── multiqc/              ← multiqc_report.html
 ```
@@ -624,7 +626,7 @@ pairix -f -p pairs results/pairs/<sample>.dedup.pairs.gz
 ### Zero loops from FitHiChIP
 
 Common causes:
-1. **Peak file is empty** — check `results/peaks/<sample>_peaks.bed`; if empty, MACS2 failed silently.
+1. **Peak file is empty** — check `results/peaks/<sample>_peaks.bed`; if empty, MACS3 failed silently.
 2. **Too few valid pairs** — check pairtools stats; if valid pair yield < 10%, the library needs resequencing.
 3. **Wrong `bin_size`** — at very low sequencing depth (< 100M total reads), 5 kb resolution is too fine. Try 10 kb: `fithichip.bin_size: 10000`.
 

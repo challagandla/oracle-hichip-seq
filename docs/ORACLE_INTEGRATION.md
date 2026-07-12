@@ -25,7 +25,7 @@ These are configured by `cooler.oracle_bin_sizes_kb` in `config/config.yaml`.
 
 The current HiChIP-only export contains:
 
-1. `peak_overlap_count_per_kb` — MACS2 peak-overlap count normalised by bin length.
+1. `peak_overlap_count_per_kb` — MACS3 peak-overlap count normalised by bin length.
 2. `insulation` — cooltools insulation score.
 3. `E1_eigenvector` — A/B compartment eigenvector.
 

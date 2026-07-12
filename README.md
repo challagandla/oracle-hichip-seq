@@ -15,8 +15,9 @@ End-to-end HiChIP processing; paired-end FASTQ in, ORACLE-ready Chromatin Operat
 | Alignment + pairs | **`bwa-mem2 -SP5M` + `pairtools` (Open2C)** | Modern HiC/HiChIP standard, replaces legacy HiC-Pro; emits `.pairs.gz` consumable by `cooler`. |
 | Storage | **`.cool` / `.mcool` (cooler)** | Compressed, HDF5-backed, multi-resolution. Generates `.hic` only on demand for Juicebox. |
 | Loop calling | **FitHiChIP `Peak-to-ALL`** | Peak-anchored HiChIP loop caller; models 1D ChIP bias. Mustache used as cross-check. |
-| Peak calling | **MACS2** | Narrow peaks for K27ac/K4me3/CTCF; broad peaks for K27me3/K36me2/K36me3. |
-| Replicate QC | **HiCRep (`hicrep`)** | Stratum-adjusted correlation robust to distance decay. Missing replicate comparisons are now reported as `NOT_ASSESSED`, not true PASS. |
+| Anchor calling | **MACS3** on single read ends | Narrow for K27ac/K4me3/CTCF/cohesin; broad for K27me3/K36me2/K36me3 **and K4me1** (ENCODE). Read ends are ligation partners, not fragment ends, so anchors are called from ends taken individually (`-f BED --nomodel --extsize 147`), never with `-f BAMPE`. MACS2 is not usable: its bioconda binaries link `__log_finite`, dropped from glibc at 2.27. |
+| Architectural stripes | **stripenn** at 10 kb | A stripe is a continuous line of enrichment anchored at one end; a loop caller tests discrete pixel pairs and cannot find one. Interpretable as an extrusion anchor on CTCF/cohesin; weaker on H3K27ac, where it is reported and not leaned on. |
+| Replicate QC | **HiCRep (`hicrep`)** | Stratum-adjusted correlation robust to distance decay. Grouped on cell type + mark, not donor. SCC is depth-dominated — HiCRep downsamples the deeper library to the shallower — so pairs below `hicrep.min_contacts_for_scc` are flagged `depth_confounded` and cannot decide PASS/FAIL. Missing comparisons report `NOT_ASSESSED`, not PASS. |
 | QC suite | **`cooltools` + `pairtools stats` + `MultiQC`** | Cis/trans, distance-decay, P(s), insulation, compartments, APA. |
 | Differential loops | **`pyDESeq2`** on per-loop counts | Comparison definitions are explicit and guarded against mixing marks/tissues/protocols. |
 | Visualisation | **`pyGenomeTracks` + cooltools APA + HiGlass optional** | Publication-grade static figures; interactive browsing for collaborators. |
@@ -106,7 +107,7 @@ HiC duplicates need to be defined on the pair, not either read alone. Expect 10�
 The pipeline balances 5 / 10 / 25 / 50 / 100 / 250 / 500 kb / 1 / 2.5 Mb. ORACLE consumes 5 kb / 25 kb / 100 kb / 1 Mb.
 
 ### 5. Call 1D peaks on the same reads
-HiChIP loop calling needs ChIP anchors. MACS2 mode is chosen per mark in `config/config.yaml`.
+HiChIP loop calling needs ChIP anchors. MACS3 mode is chosen per mark in `config/config.yaml`.
 
 ### 6. Loop calling — FitHiChIP
 FitHiChIP receives a validPairs file generated from pairtools `.pairs.gz` with read IDs preserved. FitHiChIP numeric settings are explicit in `config.yaml`, so changing thresholds does not silently desynchronise the expected output path.
@@ -115,8 +116,16 @@ FitHiChIP receives a validPairs file generated from pairtools `.pairs.gz` with r
 - Cis/trans ratio ≥ 70% cis.
 - Reads in loops ≥ 10% of valid intra-chromosomal pairs.
 - P(s) should show expected distance decay.
-- APA score ≥ 1.5 at high-confidence loops vs random shifts.
-- HiCRep SCC ≥ 0.85 where biological replicates exist.
+- APA ≥ 1.5 against a random-shift control. The control moves *both* anchors by one
+  offset, preserving the loop's genomic separation, so it is distance-matched by
+  construction. Window corners are not: a pixel `(i, j)` sits at separation
+  `D + (j - i) * bin`, so corners on opposite sides of the anti-diagonal are not
+  comparable to the centre.
+- HiCRep SCC as a sanity floor only (`hicrep.threshold_pass`), grouped on cell type
+  + mark. SCC is depth-dominated, so a pair whose shallower member falls below
+  `hicrep.min_contacts_for_scc` is flagged `depth_confounded` and cannot decide
+  PASS/FAIL. Do not read an absolute SCC as evidence that replicates are tighter
+  than conditions — on a shallow library it is not.
 - Single-replicate HiCRep is reported as `NOT_ASSESSED`, not pass.
 
 ### 8. Differential loops
@@ -133,12 +142,29 @@ differential:
       control_filter: { tissue: adjacent_normal, disease: non_cancer, library_protocol: HiChIP_v2 }
 ```
 
-### 9. Visualisation
+### 9. Architectural stripes
+Called with stripenn at 10 kb, not at the 5 kb loop resolution: a stripe is detected
+as an image feature (Canny edge detection over the contact map), and at 5 kb a
+HiChIP matrix is sparse enough that the edges traced are mostly sampling noise.
+
+Stripes are not recoverable from a loop list. A loop caller tests discrete pixel
+pairs against a distance-decay background, so a stripe — a continuous line of
+enrichment running away from one anchor — is at best fragmented into a row of
+individually unconvincing pixels. Read them against the anchor: on CTCF or cohesin a
+stripe is directly a loop-extrusion anchor; on H3K27ac the anchors are enhancers,
+extrusion is not what defines them, and fewer stripes is the expected result rather
+than a failure. Reports split by mark and never pool them.
+
+### 10. Visualisation
 - `pyGenomeTracks` for arc + heatmap composite figures.
 - APA for aggregate loop strength.
 - Virtual 4C from anchor of interest.
+- Five cohort figures in `results/figures/` (vector PDF + 400 dpi PNG), including
+  loop yield plotted *against* library depth — the panel that distinguishes a
+  biological difference in loop count from a sequencing one. Libraries below the
+  depth floor are marked, not dropped.
 
-### 10. Export to ORACLE COS format
+### 11. Export to ORACLE COS format
 Per sample the exporter emits:
 
 - `cos_<sample>.h5` equivalent at `results/oracle_cos/<sample>.h5`
