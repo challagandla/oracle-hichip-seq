@@ -21,7 +21,9 @@ TH = {
     "duplicate_pct_max": 50.0,
     "cis_fraction_min": 0.70,
     "apa_score_min": 1.5,
-    "hicrep_scc_min": 0.85,
+    # hicrep_scc_min is NOT hardcoded here: it is taken from config at runtime.
+    # A second copy of the threshold in this file silently overrode the configured
+    # one in the report, so the two could disagree about whether a sample passed.
     "n_loops_min": 1000,
 }
 
@@ -47,6 +49,8 @@ def _status(flag: bool) -> str:
 
 def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     setup_logging(snakemake.log[0])
+
+    TH["hicrep_scc_min"] = float(snakemake.config["hicrep"]["threshold_pass"])
 
     pair_stats = parse_pairtools_stats(snakemake.input.pair_stats)
     dedup_stats = parse_pairtools_stats(snakemake.input.dedup_stats)

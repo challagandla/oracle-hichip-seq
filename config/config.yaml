@@ -119,11 +119,17 @@ hicrep:
   min_contacts_for_scc: 10000000               # below this, SCC reports depth
 
 # ---------- APA ----------
+# The APA score is taken against the random-shift control, which moves both anchors
+# by the same offset and therefore preserves the loop's genomic separation. The
+# corner ratio is reported too, but it is not what decides pass/fail: contact
+# frequency inside the window is a function of distance from the diagonal, so
+# corners at different (j - i) are not comparable to the centre pixel.
 apa:
   window_size: 20                              # ± 20 bins around loop centre
   bin_size: 10000
   min_loop_dist: 100000
   n_random_controls: 5                         # random-shift controls per loop
+  score_min: 1.5                               # centre / random-shift centre
 
 # ---------- Differential loops ----------
 # Differential analysis must be stratified by mark, tissue, protocol and batch-aware

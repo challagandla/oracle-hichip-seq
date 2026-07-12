@@ -17,6 +17,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from utils import load_loops_bedpe, setup_logging, write_json  # noqa: E402
 
+MAX_SHIFT_BP = 1_000_000
+
 
 def _extract_square(clr: cooler.Cooler, chrom: str, mid1: int, mid2: int,
                     win_bp: int, balanced: bool = True) -> np.ndarray | None:
@@ -76,7 +78,14 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         for _, row in loops.iterrows():
             mid1 = (int(row.start1) + int(row.end1)) // 2
             mid2 = (int(row.start2) + int(row.end2)) // 2
-            shift = rng.integers(-1_000_000, 1_000_000)
+            # Both anchors move by the SAME offset, which preserves the genomic
+            # separation and so keeps the control on the same diagonal: the control
+            # is distance-matched to the loop by construction. The offset must also
+            # clear the window, or the "control" slides back onto the real loop and
+            # the denominator absorbs the very signal it is meant to measure.
+            shift = int(rng.integers(win_bp + bin_sz, MAX_SHIFT_BP))
+            if rng.random() < 0.5:
+                shift = -shift
             sq = _extract_square(clr, str(row.chrom1), mid1 + shift, mid2 + shift, win_bp)
             if sq is None or sq.shape != ctrl_agg.shape:
                 continue
@@ -87,11 +96,17 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         ctrl_aggs.append(ctrl_agg)
 
     centre = agg[win, win]
-    corners = np.concatenate([
-        agg[:3, :3].ravel(), agg[:3, -3:].ravel(),
-        agg[-3:, :3].ravel(), agg[-3:, -3:].ravel(),
-    ])
-    apa = float(centre / max(np.nanmean(corners), 1e-9))
+
+    # Background must sit at the SAME genomic separation as the centre pixel.
+    # In this window a pixel (i, j) lies at separation D + (j - i) * bin_sz, so the
+    # four corners span D ± 2 * win * bin_sz -- at win=20 and 10 kb bins that is a
+    # 400 kb swing. The bottom-left corner is therefore ~400 kb CLOSER to the
+    # diagonal than the loop, carries far more contacts for purely distance-decay
+    # reasons, and dominates a four-corner mean: the old denominator was inflated
+    # and the APA score correspondingly crushed. Only the two corners on the
+    # j - i = 0 anti-diagonal are distance-matched to the loop.
+    background = np.concatenate([agg[:3, :3].ravel(), agg[-3:, -3:].ravel()])
+    apa = float(centre / max(np.nanmean(background), 1e-9))
 
     ctrl_centres = [c[win, win] for c in ctrl_aggs if c.any()]
     apa_vs_ctrl = float(centre / max(np.nanmean(ctrl_centres), 1e-9))
@@ -106,12 +121,18 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     fig.tight_layout()
     fig.savefig(snakemake.output.png, dpi=150)
 
+    # Pass/fail is decided on the random-shift control, not on the corner ratio.
+    # The shifted control holds the loop's genomic separation fixed, so it is the
+    # only one of the two that is distance-matched by construction; the corner
+    # ratio is reported alongside it for comparability with published APA numbers.
+    score_min = float(snakemake.config["apa"]["score_min"])
     write_json({
         "sample": snakemake.wildcards.sample,
         "n_loops_used": int(n_used),
         "apa_score": apa,
         "apa_vs_random_shift": apa_vs_ctrl,
-        "pass": apa >= 1.5,
+        "score_min": score_min,
+        "pass": apa_vs_ctrl >= score_min,
     }, snakemake.output.json)
 
 
