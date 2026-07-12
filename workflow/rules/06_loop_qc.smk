@@ -78,14 +78,21 @@ rule compartments_to_bigwig:
 
 rule hicrep_replicate_qc:
     """
-    Stratum-adjusted correlation between biological replicates of the same
-    subject + mark. Only metric robust to distance-decay differences.
+    Stratum-adjusted correlation between biological replicates: same cell type,
+    same mark, different donors. The only concordance metric robust to
+    distance-decay differences between libraries.
+
+    Replicates are grouped on cell_type + mark, NOT subject_id + mark. Grouping on
+    the donor puts Naive, Th17 and Treg from the same person into one "replicate"
+    group and reports the correlation BETWEEN CELL TYPES as replicate concordance
+    -- which is a measurement of the biology the differential test is trying to
+    find, scored against a threshold that assumes it is measuring noise.
     """
     input:
         mcools = lambda wc: expand(
             RESULTS / "cool/{sample}.mcool",
             sample=SAMPLES[
-                (SAMPLES["subject_id"] == SAMPLES.loc[wc.sample, "subject_id"]) &
+                (SAMPLES["cell_type"] == SAMPLES.loc[wc.sample, "cell_type"]) &
                 (SAMPLES["mark"] == SAMPLES.loc[wc.sample, "mark"])
             ]["sample_id"].tolist()
         )

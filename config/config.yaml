@@ -97,11 +97,26 @@ fithichip:
   min_reads: 6                                  # downstream reporting threshold
 
 # ---------- Replicate QC ----------
+# Replicates are same cell type, same mark, different donor (see rules/06_loop_qc.smk).
+#
+# SCC is depth-dominated, and on a HiChIP matrix that matters more than it does on
+# Hi-C. HiCRep downsamples the deeper library to the shallower one's contact count,
+# so a pair is only as good as its worst member. Measured on this cohort at 25 kb:
+# two libraries from DIFFERENT cell types (90.8M and 47.6M contacts) score 0.743,
+# whereas two true replicates score 0.221 when one of them holds only 3.0M. An
+# absolute SCC cutoff would therefore have failed a real replicate pair and passed a
+# cross-cell-type pair -- it grades sequencing depth, not concordance.
+#
+# So: 0.85 (a Hi-C convention, and unreachable on an anchor-restricted HiChIP matrix)
+# is replaced by a floor that says "this looks like a contact map", and any pair whose
+# shallower member is under min_contacts_for_scc is reported as depth-confounded and
+# is not allowed to decide PASS/FAIL.
 hicrep:
   bin_size: 25000                              # 25 kb is HiCRep's sweet spot
   max_dist: 5000000                            # 5 Mb stratification
   h_smooth: 1
-  threshold_pass: 0.85                         # SCC ≥ 0.85 to call replicates concordant
+  threshold_pass: 0.70                         # sanity floor, not a concordance claim
+  min_contacts_for_scc: 10000000               # below this, SCC reports depth
 
 # ---------- APA ----------
 apa:
