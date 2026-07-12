@@ -76,6 +76,7 @@ include: "rules/07_differential.smk"
 include: "rules/08_viz.smk"
 include: "rules/09_export_oracle.smk"
 include: "rules/10_multiqc.smk"
+include: "rules/11_figures.smk"
 
 # ---------- Top-level targets ----------
 rule all:
@@ -97,7 +98,9 @@ rule all:
         expand(RESULTS / "diff/{comparison}/differential_loops.tsv",
                comparison=[c["name"] for c in config.get("differential", {}).get("comparisons", [])]),
         # MultiQC aggregate report
-        RESULTS / "multiqc/multiqc_report.html"
+        RESULTS / "multiqc/multiqc_report.html",
+        # Cohort publication figures
+        RESULTS / "figures/library_summary.tsv",
 
 # ---------- Convenience phony targets ----------
 rule qc_raw:
@@ -136,6 +139,10 @@ rule differential_all:
 rule stripes:
     input:
         RESULTS / "stripes/stripe_summary.tsv"
+
+rule figures:
+    input:
+        RESULTS / "figures/library_summary.tsv"
 
 rule multiqc:
     input:

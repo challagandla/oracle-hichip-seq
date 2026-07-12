@@ -52,6 +52,10 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     if len(loops) == 0:
         write_json({"sample": snakemake.wildcards.sample, "n_loops": 0,
                     "apa_score": None, "pass": False}, snakemake.output.json)
+        # The aggregate matrix is an output in its own right: the cohort figure
+        # renders APA panels from it, and it must exist even when there is nothing
+        # to aggregate, or one loopless sample takes the whole figure stage down.
+        np.save(snakemake.output.npy, np.zeros((2 * win + 1, 2 * win + 1)))
         plt.figure(); plt.title("No loops"); plt.savefig(snakemake.output.png); return
 
     # Aggregate real loops
@@ -125,6 +129,8 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     # The shifted control holds the loop's genomic separation fixed, so it is the
     # only one of the two that is distance-matched by construction; the corner
     # ratio is reported alongside it for comparability with published APA numbers.
+    np.save(snakemake.output.npy, agg)
+
     score_min = float(snakemake.config["apa"]["score_min"])
     write_json({
         "sample": snakemake.wildcards.sample,

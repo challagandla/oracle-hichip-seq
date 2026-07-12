@@ -119,7 +119,8 @@ rule apa_plot:
         loops = RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed"
     output:
         png = RESULTS / "qc/apa/{sample}.apa.png",
-        json = RESULTS / "qc/apa/{sample}.apa.json"
+        json = RESULTS / "qc/apa/{sample}.apa.json",
+        npy = RESULTS / "qc/apa/{sample}.apa.npy"
     params:
         window = config["apa"]["window_size"],
         bin_size = config["apa"]["bin_size"],
