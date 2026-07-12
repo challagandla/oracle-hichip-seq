@@ -380,9 +380,17 @@ results/loops/<sample>/<sample>.mustache.tsv                     ← cross-check
 If the score is < 1.5 it means your loops don't show contact enrichment above
 background, which indicates either poor loop calling or a poor-quality library.
 
-**HiCRep SCC**:
-- ≥ 0.85 between replicates of the same condition = PASS
-- < 0.7 = one replicate has failed, consider re-library
+**HiCRep SCC** — read this one carefully, it is not what it looks like:
+- Replicates are grouped on **cell type + mark**, not on donor. Several conditions
+  taken from the same donors would otherwise land in one "replicate" group.
+- SCC is **depth-dominated**: HiCRep downsamples the deeper library to the shallower,
+  so the pair is only as good as its worst member. On GSE101498 at 25 kb, two
+  libraries from *different* cell types (90.8M and 47.6M contacts) score **0.743**,
+  while two genuine replicates score **0.221** because one holds 3.0M.
+- So it is a sanity floor (`hicrep.threshold_pass`), not proof that replicates are
+  tighter than conditions. Any pair whose shallower member is below
+  `hicrep.min_contacts_for_scc` is reported as `depth_confounded` and does not decide
+  PASS/FAIL.
 - Single-replicate samples are reported as `NOT_ASSESSED` (not PASS)
 
 **Outputs**:
@@ -406,8 +414,8 @@ results/qc/loop_qc/<sample>.md
 | Duplicate fraction | ≤ 50% |
 | Cis fraction | ≥ 70% |
 | Loop count | ≥ 1,000 at q < 0.01 |
-| APA score | ≥ 1.5 vs random-shift controls |
-| HiCRep SCC | ≥ 0.85 (if ≥ 2 replicates) |
+| APA score | ≥ 1.5 vs random-shift controls (distance-matched; not the window corners) |
+| HiCRep SCC | ≥ `hicrep.threshold_pass`, and only for pairs above `hicrep.min_contacts_for_scc` — below that it grades depth, not concordance |
 
 ---
 
