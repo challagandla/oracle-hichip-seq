@@ -123,6 +123,19 @@ def _loops_to_edges(loops: pd.DataFrame, bins: pd.DataFrame) -> tuple[np.ndarray
         srcs.extend([i, j])
         dsts.extend([j, i])
         attrs.extend([attr, attr])
+    # A loop set can be non-empty and still contribute no edges: every loop may be
+    # trans, or -- the case that actually bit -- both anchors may fall in the SAME bin
+    # once binned, giving i == j. That is routine at the coarse resolutions, where a
+    # sub-100 kb loop is shorter than one bin. `np.asarray([])` is 1-D with shape (0,),
+    # and concatenating it with the 2-D adjacency attributes raises
+    #
+    #     ValueError: all the input arrays must have same number of dimensions,
+    #     but the array at index 0 has 1 dimension(s) and the array at index 1 has 2
+    #
+    # The guard at the top of this function only covered the empty-BEDPE case, so the
+    # export died on Naive_H3K27ac_rep1, whose 17 loops all collapse into single bins.
+    if not attrs:
+        return np.zeros((2, 0), dtype=np.int64), np.zeros((0, 3), dtype=np.float32)
     return np.array([srcs, dsts], dtype=np.int64), np.asarray(attrs, dtype=np.float32)
 
 

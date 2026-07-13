@@ -12,4 +12,18 @@ dependencies:
   - pandas=2.2.*
   - pip
   - pip:
+      # anndata is pinned, not left to pip's resolver. pyDESeq2 0.4 does
+      #
+      #     self.varm["non_zero"] = ~(self.X == 0).all(axis=0)
+      #     self.non_zero_idx = np.arange(self.n_vars)[self.varm["non_zero"]]
+      #
+      # which assumes varm hands back the 1-D boolean it was given. From anndata
+      # 0.11 varm is strictly 2-D and coerces that assignment to (n_vars, 1), so the
+      # second line indexes a 2-D mask and dies:
+      #
+      #     IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+      #
+      # Unpinned, pip resolved anndata 0.12.19 against pyDESeq2 0.4.12 and every
+      # differential contrast failed. Nothing in pyDESeq2's own metadata prevents it.
+      - anndata==0.10.9
       - pyDESeq2==0.4.*

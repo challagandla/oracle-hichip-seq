@@ -243,3 +243,33 @@ def test_workflow_scripts_guard_their_main_call():
         if "main(snakemake)" in src and 'if "snakemake" in globals()' not in src:
             unguarded.append(p.name)
     assert not unguarded, f"unguarded main(snakemake) call in: {unguarded}"
+
+
+# --------------------------------------------------- ORACLE COS edge construction
+def test_loops_to_edges_empty_result_keeps_2d_attr_shape():
+    """A non-empty loop set that yields no edges must still return a (0, 3) attr array.
+
+    Both anchors of a loop shorter than one bin land in the same bin (i == j) and are
+    skipped, so `attrs` can be empty even though the BEDPE was not. `np.asarray([])`
+    is 1-D, and concatenating it with the 2-D adjacency attributes raises
+
+        ValueError: all the input arrays must have same number of dimensions
+
+    which is how the COS export died on the 17-loop library.
+    """
+    cos = _load("export_oracle_cos")
+    bins = pd.DataFrame({
+        "chrom": ["chr1"] * 4,
+        "start": [0, 100_000, 200_000, 300_000],
+        "end": [100_000, 200_000, 300_000, 400_000],
+        "bin_idx": [0, 1, 2, 3],
+    })
+    # Real loop, but both anchors sit inside bin 0 -> i == j -> contributes no edge.
+    loops = pd.DataFrame([("chr1", 10_000, 15_000, "chr1", 40_000, 45_000)],
+                         columns=["chrom1", "start1", "end1", "chrom2", "start2", "end2"])
+    edge_index, edge_attr = cos._loops_to_edges(loops, bins)
+    assert edge_index.shape == (2, 0)
+    assert edge_attr.shape == (0, 3), "attr must stay 2-D or the concat with adjacency edges fails"
+    # and it must actually concatenate against a 2-D adjacency block
+    adj_attr = np.zeros((5, 3), dtype=np.float32)
+    assert np.concatenate([edge_attr, adj_attr], axis=0).shape == (5, 3)
