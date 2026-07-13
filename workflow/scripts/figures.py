@@ -268,7 +268,9 @@ def figure2_reproducibility(lib: pd.DataFrame, results: Path, out: Path) -> None
     Compartment E1 at 100 kb is robust to depth and separates cell types.
     """
     fig = plt.figure(figsize=(7.6, 3.6))
-    gs = fig.add_gridspec(1, 2, wspace=0.5, width_ratios=[1.2, 1])
+    # wspace: the colourbar label of panel a is drawn to its right and lands on
+    # panel b's bar labels at anything tighter.
+    gs = fig.add_gridspec(1, 2, wspace=0.95, width_ratios=[1.25, 1])
 
     # (a) E1 correlation across all libraries
     ax = fig.add_subplot(gs[0, 0]); _panel_label(ax, "a")
