@@ -42,7 +42,19 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     res = int(snakemake.params.res)
     matrix = f"{snakemake.input.mcool}::resolutions/{res}"
 
-    cmd = ["cooltools", "eigs-cis", "-p", str(snakemake.threads), matrix, "-o", str(prefix)]
+    # No -p/--nproc: `cooltools expected-cis` and `cooltools insulation` take one,
+    # but `eigs-cis` does not, and passing it aborts the command with
+    # "Error: No such option '-p'" (cooltools 0.7.1).
+    #
+    # --view restricts the eigendecomposition to the assembled chromosomes. hg38
+    # carries ~160 unplaced scaffolds; an A/B compartment call on a 60 kb contig is
+    # meaningless even where it computes, and on a scaffold with no valid bins the
+    # cooltools workers raise outright.
+    cmd = [
+        "cooltools", "eigs-cis",
+        "--view", str(snakemake.input.view),
+        matrix, "-o", str(prefix),
+    ]
     with open(snakemake.log[0], "a") as log:
         subprocess.run(cmd, check=True, stdout=log, stderr=log)
 

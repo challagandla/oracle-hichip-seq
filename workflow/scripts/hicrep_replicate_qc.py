@@ -23,12 +23,34 @@ from hicrep.utils import readMcool
 sys.path.insert(0, str(Path(__file__).parent))
 from utils import setup_logging, write_json  # noqa: E402
 
-# Sex chromosomes differ in copy number between donors and chrM has no meaningful
-# contact structure; either would corrupt a between-donor correlation.
-EXCLUDE_CHROMS = {"chrX", "chrY", "chrM", "X", "Y", "M", "MT"}
 SCC_SENTINEL = -2.0
 
 log = logging.getLogger(__name__)
+
+
+def _scc_chroms(view_path: str, clr_chroms: set[str]) -> list[str]:
+    """Autosomes present in the cooler, taken from the shared main-chromosome view.
+
+    hicrepSCC does not skip a chromosome it cannot score -- it asserts:
+
+        AssertionError: Contact matrix 1 of chromosome GL000208.1 is empty
+
+    and hg38 has ~160 unplaced scaffolds that are empty at 25 kb, so passing the
+    cooler's full chromosome list kills the rule. Naming the chromosomes explicitly
+    is also the correct thing statistically: SCC is a stratum-adjusted correlation
+    over a distance-decay profile, which a 60 kb contig does not have.
+
+    chrX is dropped even though it is in the view: donor sex is not recorded in this
+    cohort, so X copy number varies between the libraries being correlated.
+    """
+    keep = []
+    for line in Path(view_path).read_text().splitlines():
+        if not line.strip():
+            continue
+        c = line.split("\t")[0]
+        if c in clr_chroms and c != "chrX":
+            keep.append(c)
+    return keep
 
 
 def _cis_contacts(path: str, bin_sz: int) -> int:
@@ -46,6 +68,10 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     min_contacts = int(snakemake.config["hicrep"]["min_contacts_for_scc"])
 
     depth = {p: _cis_contacts(p, bin_sz) for p in mcools}
+
+    clr_chroms = set(cooler.Cooler(f"{mcools[0]}::resolutions/{bin_sz}").chromnames)
+    scc_chroms = _scc_chroms(snakemake.input.view, clr_chroms)
+    log.info("scoring SCC over %d chromosomes", len(scc_chroms))
 
     result = {
         "sample": snakemake.wildcards.sample,
@@ -85,7 +111,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         # downsampled to the shallower one's contact count before comparison.
         # It was previously being passed `bin_sz` positionally into this slot.
         scc = np.asarray(
-            hicrepSCC(cool_a, cool_b, h, max_dist, True, excludeChr=EXCLUDE_CHROMS),
+            hicrepSCC(cool_a, cool_b, h, max_dist, True, chrNames=scc_chroms),
             dtype=float,
         )
         scored = scc[(scc > SCC_SENTINEL) & np.isfinite(scc)]

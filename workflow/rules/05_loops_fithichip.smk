@@ -85,7 +85,7 @@ rule fithichip_config:
         bgtype = config["fithichip"].get("background_type", "Coverage_Bias"),
         outdir = lambda wc: RESULTS / f"loops/{wc.sample}"
     run:
-        outdir = Path(params.outdir)
+        outdir = Path(params.outdir).resolve()
         outdir.mkdir(parents=True, exist_ok=True)
         # Key set follows FitHiChIP 11.0's own configfile. The previous template
         # carried Draw / TimeProf / HiCProBasedir, which 11.0 does not read, and
@@ -93,6 +93,13 @@ rule fithichip_config:
         # significant bins are reported as separate loops instead of being merged
         # into one contact, which inflates the loop count and double-counts the
         # same interaction in the differential test downstream.
+        #
+        # EVERY path is resolved to an absolute one. FitHiChIP chdir's into its own
+        # release directory before invoking its R and python steps, so a relative
+        # path in the config is resolved against the wrong root and the file simply
+        # is not there. It absolutises COOL itself but not ChrSizeFile / PeakFile /
+        # OutDir, so with Snakemake's relative inputs it read no peaks and no
+        # chromosome sizes, and exited before writing anything.
         text = f"""
 # Auto-generated FitHiChIP config for sample {wildcards.sample}
 # interaction_type={params.itype}; background_type={params.bgtype}
@@ -105,8 +112,8 @@ Matrix=
 Bed=
 HIC=
 COOL={Path(input.cool).resolve()}
-ChrSizeFile={input.chromsizes}
-PeakFile={input.peaks}
+ChrSizeFile={Path(input.chromsizes).resolve()}
+PeakFile={Path(input.peaks).resolve()}
 OutDir={outdir}/
 CircularGenome=0
 IntType={params.int_code}
@@ -175,7 +182,12 @@ rule fithichip_run:
         # version of this rule probed for a `fithichip` executable and, failing
         # that, told the user to `mamba install -c bioconda fithichip`, which does
         # not exist on any channel.
-        bash {input.script} -C {input.cfg} 2> {log}
+        # `> {log} 2>&1`, not `2> {log}`: FitHiChIP reports its fatal errors on
+        # STDOUT, not stderr -- including the one that matters here,
+        #   'ERROR ===>>> ... file does not exist'
+        # so redirecting only stderr left an EMPTY log behind every failure and the
+        # rule could only report that no BED appeared, never why.
+        bash {input.script} -C {input.cfg} > {log} 2>&1
 
         outdir="$(dirname {output.loops})"
 

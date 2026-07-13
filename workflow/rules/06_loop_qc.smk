@@ -2,13 +2,51 @@
 # Cis/trans ratio, P(s) distance decay, insulation scores, A/B compartments,
 # APA aggregate analysis on the called loop set, HiCRep replicate concordance.
 
+
+rule main_chrom_view:
+    """A cooltools 'view' restricted to the assembled chromosomes.
+
+    hg38 carries ~160 unplaced scaffolds and alt contigs. cooltools and HiCRep
+    otherwise iterate every region in the cooler, and on a scaffold with no valid
+    bins after balancing they do not skip it -- they die:
+
+        cooltools insulation  IndexError: index 0 is out of bounds for axis 0 with size 0
+        hicrepSCC             AssertionError: Contact matrix 1 of chromosome GL000208.1 is empty
+
+    Restricting them is not just a workaround. Insulation, compartments and
+    stratum-adjusted correlation are all defined on a chromosome with a real
+    distance-decay profile; on a 60 kb unplaced contig they are meaningless even
+    when they happen to compute.
+
+    chrY is dropped as well: donor sex is not recorded in this cohort, so it is
+    present in some libraries and absent in others, and a region that exists for
+    only some samples cannot be compared across them.
+    """
+    input:
+        chromsizes = GENOME["chromsizes"],
+    output:
+        view = RESULTS / "qc/view_main_chroms.bed",
+    conda: "../envs/coreutils.yaml"
+    log:
+        RESULTS / "logs/main_chrom_view.log",
+    shell:
+        r"""
+        mkdir -p $(dirname {output.view}) $(dirname {log})
+        awk 'BEGIN{{OFS="\t"}} $1 ~ /^chr([0-9]+|X)$/ {{print $1, 0, $2, $1}}' \
+            {input.chromsizes} | sort -k1,1V > {output.view} 2> {log}
+        test -s {output.view}
+        echo "view regions: $(wc -l < {output.view})" >> {log}
+        """
+
+
 rule cooltools_expected_cis:
     """
     P(s) distance-decay curve. The expected −1 slope on log–log is the
     canonical sanity check for any HiC-style assay.
     """
     input:
-        mcool = RESULTS / "cool/{sample}.mcool"
+        mcool = RESULTS / "cool/{sample}.mcool",
+        view = RESULTS / "qc/view_main_chroms.bed",
     output:
         expected = RESULTS / "qc/expected/{sample}.expected.cis.tsv"
     params:
@@ -19,7 +57,7 @@ rule cooltools_expected_cis:
         RESULTS / "logs/cooltools_expected/{sample}.log"
     shell:
         r"""
-        cooltools expected-cis -p {threads} \
+        cooltools expected-cis -p {threads} --view {input.view} \
             {input.mcool}::resolutions/{params.res} \
             > {output.expected} 2> {log}
         """
@@ -27,7 +65,8 @@ rule cooltools_expected_cis:
 rule cooltools_insulation:
     """Insulation score (TAD boundary detection)."""
     input:
-        mcool = RESULTS / "cool/{sample}.mcool"
+        mcool = RESULTS / "cool/{sample}.mcool",
+        view = RESULTS / "qc/view_main_chroms.bed",
     output:
         tsv = RESULTS / "qc/insulation/{sample}.insulation.tsv"
     params:
@@ -39,8 +78,12 @@ rule cooltools_insulation:
         RESULTS / "logs/cooltools_insulation/{sample}.log"
     shell:
         r"""
+        # --view: without it cooltools walks every unplaced scaffold in the cooler
+        # and dies on the first one with no valid bins after balancing
+        # (IndexError: index 0 is out of bounds for axis 0 with size 0).
         cooltools insulation \
             -p {threads} \
+            --view {input.view} \
             {input.mcool}::resolutions/{params.res} \
             {params.window} \
             > {output.tsv} 2> {log}
@@ -49,7 +92,8 @@ rule cooltools_insulation:
 rule cooltools_eigs_cis:
     """A/B compartment eigenvectors at 100 kb, normalised to a stable TSV schema."""
     input:
-        mcool = RESULTS / "cool/{sample}.mcool"
+        mcool = RESULTS / "cool/{sample}.mcool",
+        view = RESULTS / "qc/view_main_chroms.bed",
     output:
         cis = RESULTS / "qc/compartments/{sample}.cis.eigs.tsv"
     params:
@@ -95,7 +139,8 @@ rule hicrep_replicate_qc:
                 (SAMPLES["cell_type"] == SAMPLES.loc[wc.sample, "cell_type"]) &
                 (SAMPLES["mark"] == SAMPLES.loc[wc.sample, "mark"])
             ]["sample_id"].tolist()
-        )
+        ),
+        view = RESULTS / "qc/view_main_chroms.bed"
     output:
         json = RESULTS / "qc/hicrep/{sample}.hicrep.json"
     params:
