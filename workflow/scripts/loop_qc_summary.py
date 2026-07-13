@@ -69,7 +69,11 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     # ratio while APA itself graded it on the distance-matched control, so the two
     # could disagree about the same library.
     apa_score = apa.get("apa_vs_random_shift")
-    hicrep_mean = hicrep.get("mean_scc")
+    # best_scc, matching the statistic hicrep_replicate_qc itself decides PASS on --
+    # the SCC against the replicate this library agrees with best. Grading on
+    # mean_scc here would let this file and the HiCRep file reach opposite verdicts
+    # about the same library whenever one sibling in a group is bad.
+    hicrep_best = hicrep.get("best_scc")
 
     pass_flags = {
         "valid_pair_yield": valid_yield >= TH["valid_pair_yield_pct"],
@@ -79,11 +83,11 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         "apa_score": (apa_score or 0) >= TH["apa_score_min"],
     }
     status_flags = {k: _status(v) for k, v in pass_flags.items()}
-    if hicrep_mean is None:
+    if hicrep_best is None:
         status_flags["hicrep_scc"] = "NOT_ASSESSED"
         hicrep_pass = None
     else:
-        hicrep_pass = hicrep_mean >= TH["hicrep_scc_min"]
+        hicrep_pass = hicrep_best >= TH["hicrep_scc_min"]
         status_flags["hicrep_scc"] = _status(hicrep_pass)
 
     hard_pass = all(pass_flags.values()) and (hicrep_pass is not False)
@@ -102,7 +106,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         "n_loops": int(n_loops),
         "apa_score": apa_score,
         "apa_vs_random_shift": apa.get("apa_vs_random_shift"),
-        "hicrep_mean_scc": hicrep_mean,
+        "hicrep_best_scc": hicrep_best,
         "hicrep_status": hicrep.get("status", status_flags["hicrep_scc"]),
         "thresholds": TH,
         "pass_flags": pass_flags,
@@ -113,7 +117,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     write_json(report, snakemake.output.json)
 
     apa_line = f"- APA score: **{apa_score:.2f}** (threshold ≥ {TH['apa_score_min']})" if apa_score is not None else "- APA score: **NA**"
-    hicrep_line = f"- HiCRep mean SCC: **{hicrep_mean:.3f}** (threshold ≥ {TH['hicrep_scc_min']})" if hicrep_mean is not None else "- HiCRep mean SCC: **NOT_ASSESSED**"
+    hicrep_line = f"- HiCRep best-replicate SCC: **{hicrep_best:.3f}** (threshold ≥ {TH['hicrep_scc_min']})" if hicrep_best is not None else "- HiCRep best-replicate SCC: **NOT_ASSESSED**"
     md_lines = [
         f"# QC report — {snakemake.wildcards.sample}",
         "",

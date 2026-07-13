@@ -188,9 +188,38 @@ stripes:
   enabled: true
   resolution: 10000                             # 10 kb; 5 kb is too sparse per-pixel
   max_pixel_pval: 0.1
-  min_length: 20000                             # ignore sub-2-bin nubs
-  max_width: 100000
+  # min_length / max_width are given in BASE PAIRS here and converted to bins by the
+  # rule. stripenn's own --minL/--maxW are in BINS, not bp: minL feeds minH, and maxW
+  # is compared against bin indices (`abs(m - n) <= self.maxW`). Passing bp straight
+  # through asked for a 200 Mb minimum stripe length -- longer than any human
+  # chromosome -- so nothing could ever be called.
+  #
+  # The values are stripenn's validated defaults (minL=10 bins, maxW=8 bins) restated
+  # at this resolution. 100 kb is also the right floor biologically: a stripe shorter
+  # than that is not distinguishable from the loop it is anchored on.
+  min_length: 100000                            # 10 bins at 10 kb
+  max_width: 80000                              # 8 bins at 10 kb
   canny_sigma: 2.0
+  # Raw counts, stated explicitly rather than arrived at by accident.
+  #
+  # stripenn is an IMAGE method: it saturates the contact map at a percentile, clips
+  # to [0,1] and runs Canny edge detection. cooler's ICE balancing leaves NaN in
+  # every unmappable bin -- 24.2% of the chr1 matrix here, with 3,224 rows entirely
+  # NaN -- and NaN survives the clip, so Canny finds no edges and the caller returns
+  # zero stripes genome-wide. Measured on Naive_CTCF_rep1, chr1, identical thresholds:
+  #
+  #     --norm weight  ->   0 candidates,  0 stripes
+  #     --norm None    ->  55 candidates, 38 stripes
+  #
+  # This is by design, not a defect: stripenn's own matrix handle is `unbalLib`, and
+  # it controls coverage bias with the per-chromosome percentile saturation plus a
+  # background null model and a p-value, not by balancing the matrix.
+  #
+  # Its default is KR, which is not a column in a cooler-balanced file. That does not
+  # fail -- it prints "Normalization method is forced to None" and silently uses raw
+  # counts anyway. Naming None here gets the same matrix by choice, and means a
+  # future cooler that DOES carry a KR column cannot silently change the answer.
+  norm: "None"
 
 # ---------- Visualisation regions of interest ----------
 # The loci that decide whether the experiment worked. For CD4 T-helper subsets

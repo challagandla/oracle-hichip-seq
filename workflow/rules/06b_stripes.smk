@@ -30,6 +30,7 @@ rule stripenn_call:
     """
     input:
         mcool = RESULTS / "cool/{sample}.mcool",
+        view = RESULTS / "qc/view_main_chroms.bed",
     output:
         tsv = RESULTS / "stripes/{sample}/result_unfiltered.tsv",
         filtered = RESULTS / "stripes/{sample}/result_filtered.tsv",
@@ -38,8 +39,11 @@ rule stripenn_call:
         res = config["stripes"]["resolution"],
         pval = config["stripes"]["max_pixel_pval"],
         canny = config["stripes"]["canny_sigma"],
-        minlen = config["stripes"]["min_length"],
-        maxw = config["stripes"]["max_width"],
+        norm = config["stripes"].get("norm", "weight"),
+        # bp -> bins. stripenn's --minL/--maxW are counts of bins, not base pairs;
+        # config states them in bp so they stay meaningful if the resolution changes.
+        minlen = max(1, config["stripes"]["min_length"] // config["stripes"]["resolution"]),
+        maxw = max(1, config["stripes"]["max_width"] // config["stripes"]["resolution"]),
     threads: config["threads"]["stripenn"]
     conda: "../envs/stripenn.yaml"
     log:
@@ -57,24 +61,64 @@ rule stripenn_call:
         # shadowing a conda environment: the env is correct, the search order is not.
         export LD_LIBRARY_PATH="${{CONDA_PREFIX}}/lib${{LD_LIBRARY_PATH:+:${{LD_LIBRARY_PATH}}}}"
 
+        # --chrom: stripenn takes a quantile of the non-zero pixels of every
+        # chromosome it is given --
+        #
+        #     mat = self.unbalLib.fetch(CHROM); np.quantile(mat[mat>0], quantile)
+        #
+        # -- and on an unplaced scaffold with no contacts that array is empty, which
+        # is fatal (IndexError: index -1 is out of bounds for axis 0 with size 0).
+        # Its own scaffold filter only drops names containing JH5/GL4/RANDOM, which
+        # does not match hg38's GL000008.2 / KI270*, so all ~160 get through. Reuse
+        # the same assembled-chromosome view that cooltools and HiCRep take; stripenn
+        # already excludes chrM and chrY itself.
+        CHROMS=$(cut -f1 {input.view} | paste -sd,)
+
+        # stdin via process substitution, NOT `yes Y | stripenn`. stripenn asks on
+        # stdin whether it may clear a pre-existing output directory, and Snakemake
+        # always creates the parent directory of a rule's outputs, so that directory
+        # ALWAYS exists by the time stripenn runs; with no terminal attached the
+        # prompt reads EOF and click aborts. But feeding it through a PIPE trades one
+        # bug for another: `yes` is killed by SIGPIPE the moment stripenn stops
+        # reading, and under `set -o pipefail` that kills the rule -- after a run that
+        # had actually succeeded, whose outputs Snakemake then deleted as incomplete.
+        # A redirect is not a pipeline, so pipefail never sees the writer.
+        #
+        # --norm {params.norm}: RAW counts, deliberately. Feeding stripenn the
+        # ICE-balanced matrix returns zero stripes genome-wide -- it is an image
+        # method, cooler's balancing leaves NaN in every unmappable bin (24.2% of the
+        # chr1 matrix here), and NaN survives the clip so Canny finds no edges.
+        # Measured on Naive_CTCF_rep1/chr1 at identical thresholds: balanced 0
+        # stripes, raw 38. See the note in config.yaml.
+        #
+        # No `|| true`. Swallowing the exit status is what made an abort and a
+        # genuine empty result look identical for eleven libraries.
         stripenn compute \
             --cool {input.mcool}::/resolutions/{params.res} \
             --out {params.outdir}/ \
+            --chrom "$CHROMS" \
+            --norm {params.norm} \
             --pvalue {params.pval} \
             --numcores {threads} \
             --canny {params.canny} \
             --minL {params.minlen} \
             --maxW {params.maxw} \
-            > {log} 2>&1 || true
+            < <(printf 'Y\n') \
+            > {log} 2>&1
 
-        # stripenn writes nothing when it finds no stripes, and a missing file is
-        # indistinguishable from a crash to Snakemake. Materialise both tables with
-        # a header either way, and let the QC summary report the count.
+        # Only reachable when stripenn exited 0 (set -e above); a crash can no longer
+        # arrive here and be recorded as "no stripes". stripenn does write both
+        # tables unconditionally, header included, even when the frame is empty, so
+        # this is a guard rather than the normal path -- but the header must match
+        # what it actually emits. The columns below are the post-`drop` set from
+        # stripenn.py: total/num/start/end/x/y/h/w/medpixel are dropped and
+        # Stripiness is appended, so the previous header here named nine columns that
+        # do not exist in the file and omitted the one the summary sorts on.
         for f in result_unfiltered.tsv result_filtered.tsv; do
             if [ ! -s {params.outdir}/$f ]; then
-                printf 'chr\tpos1\tpos2\tchr2\tpos3\tpos4\tlength\twidth\ttotal\tMean\tmaxpixel\tnum\tstart\tend\tx\ty\th\tw\tmedpixel\tpvalue\n' \
+                printf 'chr\tpos1\tpos2\tchr2\tpos3\tpos4\tlength\twidth\tMean\tmaxpixel\tpvalue\tStripiness\n' \
                     > {params.outdir}/$f
-                echo "no stripes called for {wildcards.sample}" >> {log}
+                echo "stripenn exited 0 but called no stripes for {wildcards.sample}" >> {log}
             fi
         done
         """

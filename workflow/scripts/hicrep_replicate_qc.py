@@ -73,8 +73,10 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     scc_chroms = _scc_chroms(snakemake.input.view, clr_chroms)
     log.info("scoring SCC over %d chromosomes", len(scc_chroms))
 
+    this_sample = snakemake.wildcards.sample
+
     result = {
-        "sample": snakemake.wildcards.sample,
+        "sample": this_sample,
         "bin_size": bin_sz,
         "max_dist": max_dist,
         "h": h,
@@ -83,6 +85,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         "min_contacts_for_scc": min_contacts,
         "pairwise_scc": [],
         "mean_scc": None,
+        "best_scc": None,
         "threshold": threshold,
         "status": "NOT_ASSESSED",
         "pass": None,
@@ -131,11 +134,19 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
                 Path(a).stem, Path(b).stem, mean_scc, shallow, min_contacts,
             )
             continue
-        sccs.append(mean_scc)
+        # Only pairs THIS library is in. Every sample of a replicate group receives
+        # the same input list and therefore computes the same set of pairs, so
+        # averaging all of them gave every member of the group one shared verdict --
+        # and that verdict is dominated by the good pairs. Naive_H3K27ac_rep1 holds
+        # 3.3M reads and correlates with its replicates at 0.23, but the group also
+        # contains rep2-vs-rep3 at 0.867, so rep1 was being written out as PASS. A
+        # per-sample QC file has to answer a question about that sample.
+        if this_sample in (Path(a).stem, Path(b).stem):
+            sccs.append(mean_scc)
 
     if not sccs:
         result["note"] = (
-            "No replicate pair cleared the depth floor of "
+            "No replicate pair involving this library cleared the depth floor of "
             f"{min_contacts} contacts at {bin_sz} bp; SCC would report sequencing "
             "depth rather than replicate concordance, so it was not assessed."
         )
@@ -143,7 +154,14 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         return
 
     result["mean_scc"] = float(np.mean(sccs))
-    result["pass"] = result["mean_scc"] >= threshold
+    result["best_scc"] = float(np.max(sccs))
+    # PASS on the BEST-agreeing replicate, not the mean. The question a per-library
+    # QC flag answers is "is this library reproducible", and a library that
+    # reproduces a sibling has answered it. Averaging instead lets one bad sibling
+    # fail a good library: Treg_H3K27ac_rep2 agrees with rep3 at 0.829 and with the
+    # marginal rep1 at 0.488, and the mean of those two (0.659) would fail rep2 for
+    # rep1's shortcoming. rep1 still fails on its own file, which is where it belongs.
+    result["pass"] = result["best_scc"] >= threshold
     result["status"] = "PASS" if result["pass"] else "FAIL"
     write_json(result, snakemake.output.json)
 
