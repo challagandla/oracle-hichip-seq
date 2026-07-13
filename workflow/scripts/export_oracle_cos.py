@@ -300,4 +300,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     Path(snakemake.output.manifest).write_text(json.dumps(manifest, indent=2))
 
 
-main(snakemake)  # type: ignore[name-defined]  # noqa: F821
+# Guarded so the module can be imported by the tests. Snakemake injects
+# `snakemake` into the script's globals before executing it.
+if "snakemake" in globals():
+    main(snakemake)  # type: ignore[name-defined]  # noqa: F821

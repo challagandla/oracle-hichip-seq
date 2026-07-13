@@ -68,4 +68,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     fig.savefig(snakemake.output.png, dpi=150)
 
 
-main(snakemake)  # type: ignore[name-defined]  # noqa: F821
+# Guarded so the module can be imported by the tests. Snakemake injects
+# `snakemake` into the script's globals before executing it.
+if "snakemake" in globals():
+    main(snakemake)  # type: ignore[name-defined]  # noqa: F821

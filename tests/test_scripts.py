@@ -8,8 +8,6 @@ matrix whose contents are known exactly, not against a golden output file.
 
 Run: pytest -q tests/
 """
-from __future__ import annotations
-
 import importlib.util
 import sys
 from pathlib import Path
@@ -207,3 +205,41 @@ def test_hicrep_sentinel_is_masked_not_averaged():
     assert scored.mean() == pytest.approx(0.8)
     # np.nanmean does NOT skip the sentinel -- this is the bug being pinned
     assert np.nanmean(scc) < scored.mean()
+
+
+# ------------------------------------------------------- snakemake compatibility
+def test_no_future_imports_in_workflow_scripts():
+    """No workflow script may carry `from __future__ import ...`.
+
+    Snakemake prepends its own preamble to every file used by a `script:` directive,
+    which pushes a __future__ import below other statements -- and Python rejects
+    that outright:
+
+        SyntaxError: from __future__ imports must occur at the beginning of the file
+
+    Every script rule in the workflow died on this the first time the full DAG ran
+    against real data. The other tests in this file did not catch it because they
+    import the modules directly, which is not how Snakemake executes them.
+    """
+    offenders = [
+        p.name for p in sorted(SCRIPTS.glob("*.py"))
+        if "from __future__ import" in p.read_text()
+    ]
+    assert not offenders, (
+        "these scripts will raise SyntaxError under Snakemake's script preamble: "
+        f"{offenders}"
+    )
+
+
+def test_workflow_scripts_guard_their_main_call():
+    """A script must not call main(snakemake) at import time.
+
+    Snakemake injects `snakemake` into the script's globals; a test import does not.
+    Without the guard the module cannot be imported at all, so none of it is testable.
+    """
+    unguarded = []
+    for p in sorted(SCRIPTS.glob("*.py")):
+        src = p.read_text()
+        if "main(snakemake)" in src and 'if "snakemake" in globals()' not in src:
+            unguarded.append(p.name)
+    assert not unguarded, f"unguarded main(snakemake) call in: {unguarded}"
