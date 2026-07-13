@@ -5,8 +5,6 @@ Default: pyDESeq2 on the loop-by-sample count matrix. The Snakemake rule guards
 comparison definition so groups are mark/tissue/protocol compatible before this
 script is called.
 """
-from __future__ import annotations
-
 import json
 import hashlib
 import sys

@@ -1,6 +1,4 @@
 """Export the E1 eigenvector (A/B compartments) to bigWig."""
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

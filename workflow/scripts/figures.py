@@ -11,8 +11,6 @@ Nothing here silently hides a bad library. Shallow libraries stay on the plots a
 are marked, because the reader's first question about a HiChIP cohort is whether
 the contrast is driven by biology or by depth.
 """
-from __future__ import annotations
-
 import json
 import logging
 import sys

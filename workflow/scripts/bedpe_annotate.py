@@ -3,8 +3,6 @@ Annotate loop anchors with overlapping peaks and the nearest gene / TSS,
 and flag anchors that overlap CTCF sites and super-enhancers (if provided
 via config). Writes an annotated BEDPE.
 """
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

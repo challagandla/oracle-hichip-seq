@@ -4,8 +4,6 @@ Different cooltools releases vary in whether -o is treated as a prefix or an
 exact file. This wrapper always emits exactly snakemake.output.cis with columns
 chrom, start, end, E1 so downstream scripts do not depend on cooltools naming.
 """
-from __future__ import annotations
-
 import subprocess
 import sys
 from pathlib import Path

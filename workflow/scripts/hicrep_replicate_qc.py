@@ -10,8 +10,6 @@ chromosomes it could not score keep -2.0, and averaging without masking them
 drags SCC toward -2. Chromosomes are excluded via the function's own excludeChr
 argument rather than by matching substrings of the returned keys.
 """
-from __future__ import annotations
-
 import logging
 import sys
 from itertools import combinations

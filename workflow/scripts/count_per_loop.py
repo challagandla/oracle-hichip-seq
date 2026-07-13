@@ -24,8 +24,6 @@ table instead of a cooler .fetch() per loop. A union set is O(10^5) loops and ea
 .fetch() is an indexed HDF5 range read, so per-loop fetching costs hours per sample;
 the pixel table is read linearly once.
 """
-from __future__ import annotations
-
 import logging
 import sys
 from pathlib import Path

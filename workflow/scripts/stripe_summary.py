@@ -7,8 +7,6 @@ the extruding complex and produces stripes by definition, whereas an H3K27ac
 anchor set marks enhancers, which are not extrusion anchors and yield far fewer.
 A lower stripe count on H3K27ac is the expected result, not a worse experiment.
 """
-from __future__ import annotations
-
 import pandas as pd
 
 samples = list(snakemake.params.samples)  # noqa: F821

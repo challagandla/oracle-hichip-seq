@@ -3,8 +3,6 @@ Aggregate per-sample QC into a single JSON + Markdown summary with pass/fail
 flags. Replicate QC uses PASS / FAIL / NOT_ASSESSED instead of pretending a
 single-replicate sample passed HiCRep.
 """
-from __future__ import annotations
-
 import json
 import re
 import sys

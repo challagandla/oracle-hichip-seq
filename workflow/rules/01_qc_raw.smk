@@ -30,8 +30,14 @@ rule fastqc_raw:
         test -f "{params.outdir}/${{R2_STEM}}_fastqc.html" || \
             {{ echo "ERROR: FastQC did not produce ${{R2_STEM}}_fastqc.html" >&2; exit 1; }}
 
-        mv "{params.outdir}/${{R1_STEM}}_fastqc.html" {output.r1_html} 2>>{log}
-        mv "{params.outdir}/${{R2_STEM}}_fastqc.html" {output.r2_html} 2>>{log}
+        # Only rename when the names actually differ. The FASTQs here are already
+        # named {{sample}}_R1.fastq.gz, so the "canonical" target IS the FastQC
+        # output, and `mv x x` fails with "are the same file" -- taking the rule
+        # down over a rename it did not need to do.
+        [ "{params.outdir}/${{R1_STEM}}_fastqc.html" -ef "{output.r1_html}" ] || \
+            mv "{params.outdir}/${{R1_STEM}}_fastqc.html" {output.r1_html} 2>>{log}
+        [ "{params.outdir}/${{R2_STEM}}_fastqc.html" -ef "{output.r2_html}" ] || \
+            mv "{params.outdir}/${{R2_STEM}}_fastqc.html" {output.r2_html} 2>>{log}
         """
 
 

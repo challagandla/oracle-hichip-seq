@@ -17,8 +17,6 @@ a pixel (i, j) lies at separation D + (j - i) * bin_size. So corners at differen
 (j - i) are not interchangeable, and averaging all four -- as this did -- puts a
 corner that is 2 * win * bin_size CLOSER to the diagonal into the denominator.
 """
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

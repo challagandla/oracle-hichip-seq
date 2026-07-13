@@ -2,8 +2,6 @@
 Virtual 4C: pick a viewpoint (anchor of interest) and plot the contact frequency
 of every other bin on the same chromosome from that viewpoint.
 """
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

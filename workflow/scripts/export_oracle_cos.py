@@ -6,8 +6,6 @@ Current scope: HiChIP structural graph + peak-overlap prototype node features.
 True continuous per-mark signal tracks (bigWig/RPKM), ATAC and methylation
 channels are intentionally left for sister modality pipelines and later merge.
 """
-from __future__ import annotations
-
 import hashlib
 import json
 import logging

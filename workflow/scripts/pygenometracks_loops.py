@@ -5,8 +5,6 @@ Build a pyGenomeTracks composite figure for a region of interest:
   - 1D MACS2 peaks
   - arc plot of FitHiChIP loops
 """
-from __future__ import annotations
-
 import subprocess
 import sys
 from pathlib import Path
