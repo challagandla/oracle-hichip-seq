@@ -89,11 +89,55 @@ rule cooltools_insulation:
             > {output.tsv} 2> {log}
         """
 
+rule gc_phasing_track:
+    """GC content per 100 kb bin, used to orient the compartment eigenvector.
+
+    The sign of an eigenvector is arbitrary. cooltools solves E1 per chromosome, so
+    without a phasing track "A" is positive on some chromosomes and negative on
+    others, independently in every sample. Correlating raw E1 between two libraries
+    then averages random sign flips towards zero: two Naive replicates that HiCRep
+    scores at 0.867 came out at 0.20 on compartment agreement, and some genuine
+    replicate pairs were NEGATIVE. The compartments were right; only their
+    orientation was unfixed.
+
+    GC content is the standard phasing track -- the A compartment is the
+    gene-rich, GC-rich one -- so it fixes the sign the same way in every sample and
+    makes E1 comparable across libraries.
+    """
+    input:
+        chromsizes = GENOME["chromsizes"],
+        fasta = GENOME["fasta"],
+        view = RESULTS / "qc/view_main_chroms.bed",
+    output:
+        gc = RESULTS / "qc/compartments/gc_100kb.tsv",
+    params:
+        res = 100000,
+    threads: 1
+    conda: "../envs/cooltools.yaml"
+    log:
+        RESULTS / "logs/gc_phasing_track.log",
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p $(dirname {output.gc}) $(dirname {log})
+        tmp=$(dirname {output.gc})/.bins_{params.res}.bed
+        # Binnify the assembled chromosomes only, matching the view every other
+        # cooltools rule uses; a GC value for an unplaced scaffold has nothing to
+        # phase against.
+        cooltools genome binnify --all-names {input.chromsizes} {params.res} \
+            | awk 'NR==1 || $1 ~ /^chr([0-9]+|X)$/' > "$tmp" 2> {log}
+        cooltools genome gc "$tmp" {input.fasta} > {output.gc} 2>> {log}
+        rm -f "$tmp"
+        test -s {output.gc}
+        """
+
+
 rule cooltools_eigs_cis:
     """A/B compartment eigenvectors at 100 kb, normalised to a stable TSV schema."""
     input:
         mcool = RESULTS / "cool/{sample}.mcool",
         view = RESULTS / "qc/view_main_chroms.bed",
+        gc = RESULTS / "qc/compartments/gc_100kb.tsv",
     output:
         cis = RESULTS / "qc/compartments/{sample}.cis.eigs.tsv"
     params:

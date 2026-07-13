@@ -50,9 +50,18 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     # carries ~160 unplaced scaffolds; an A/B compartment call on a 60 kb contig is
     # meaningless even where it computes, and on a scaffold with no valid bins the
     # cooltools workers raise outright.
+    # --phasing-track: the sign of an eigenvector is arbitrary, and cooltools solves
+    # E1 one chromosome at a time, so without phasing "A" is positive on some
+    # chromosomes and negative on others -- independently in each sample. Correlating
+    # raw E1 across libraries then averages random sign flips towards zero: two Naive
+    # replicates that HiCRep scores at 0.867 agreed at 0.20 on compartments, and some
+    # true replicate pairs came out NEGATIVE. GC content is the standard phasing track
+    # (the A compartment is the GC-rich, gene-rich one), and it fixes the sign
+    # identically in every sample.
     cmd = [
         "cooltools", "eigs-cis",
         "--view", str(snakemake.input.view),
+        "--phasing-track", str(snakemake.input.gc),
         matrix, "-o", str(prefix),
     ]
     with open(snakemake.log[0], "a") as log:

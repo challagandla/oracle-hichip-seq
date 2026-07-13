@@ -405,33 +405,55 @@ def figure3_loops(lib: pd.DataFrame, results: Path, out: Path) -> None:
     else:
         _empty(ax, "no loops called")
 
-    # (d-f) APA, aggregated per cell type
-    by_ct: dict[str, list[np.ndarray]] = {}
+    # (d) APA, aggregated per (cell type, mark)
+    by_ct: dict[tuple[str, str], list[np.ndarray]] = {}
     for sid, r in lib.iterrows():
         f = results / f"qc/apa/{sid}.apa.npy"
         if not f.exists():
             continue
         m = np.load(f)
+        # An all-zero matrix is what apa_plot writes for a NOT_ASSESSED sample (too
+        # few loops to aggregate). Averaging it in would drag the panel toward zero
+        # while inflating n, so it is dropped and n reports what was actually used.
         if m.any():
-            by_ct.setdefault(r["cell_type"], []).append(m)
+            # Keyed on (cell_type, mark), NOT cell_type alone. Grouping by cell type
+            # put the two Naive CTCF libraries into the same average as the Naive
+            # H3K27ac ones -- a TF anchor set and a histone anchor set have different
+            # APA profiles by construction (CTCF scores 20-39x here, H3K27ac 2.8-4x),
+            # and the mean of the two describes neither.
+            by_ct.setdefault((r["cell_type"], r["mark"]), []).append(m)
 
-    for i, ct in enumerate(["Naive", "Th17", "Treg"]):
-        ax = fig.add_subplot(gs[1, i])
+    # H3K27ac for the three cell types, then the CTCF anchor set on its own.
+    panels = [("Naive", "H3K27ac"), ("Th17", "H3K27ac"),
+              ("Treg", "H3K27ac"), ("Naive", "CTCF")]
+    sub = gs[1, :].subgridspec(1, len(panels), wspace=0.62)
+
+    for i, key in enumerate(panels):
+        ct, mark = key
+        ax = fig.add_subplot(sub[0, i])
         if i == 0:
             _panel_label(ax, "d")
-        mats = by_ct.get(ct)
+        mats = by_ct.get(key)
         if not mats:
-            _empty(ax, f"{ct}: no APA")
+            _empty(ax, f"{ct} {mark}: no APA")
             continue
         m = np.mean(mats, axis=0)
         win = (m.shape[0] - 1) // 2
         im = ax.imshow(np.log2(m + 1), cmap="Reds", origin="lower",
                        extent=[-win, win, -win, win])
-        ax.set_title(f"{ct} (n={len(mats)})", loc="left", color=_colour(ct))
+        ax.set_title(f"{ct} {mark} (n={len(mats)})", loc="left",
+                     color=_colour(ct), fontsize=7)
         ax.set_xlabel("bins (10 kb)")
         if i == 0:
             ax.set_ylabel("bins (10 kb)")
-        fig.colorbar(im, ax=ax, fraction=0.046, label="log2(1+contacts)")
+        else:
+            ax.set_yticklabels([])
+        cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cb.ax.tick_params(labelsize=5)
+        # Only the last colourbar is labelled: the label is drawn to the right of the
+        # bar and ran straight into the next panel's tick labels.
+        if i == len(panels) - 1:
+            cb.set_label("log2(1+contacts)", fontsize=6)
 
     fig.suptitle("Figure 3 · Loop calling and aggregate peak analysis", x=0.02,
                  ha="left", fontsize=9, fontweight="bold")
@@ -515,8 +537,9 @@ def figure5_stripes(lib: pd.DataFrame, results: Path, out: Path) -> None:
     the expected result -- not a failure. The figure is split by mark so the two are
     never averaged together.
     """
-    fig = plt.figure(figsize=(7.6, 3.4))
-    gs = fig.add_gridspec(1, 3, wspace=0.45)
+    fig = plt.figure(figsize=(7.6, 4.0))
+    # top=0.82: the suptitle sits on the same line as the panel "a" label otherwise.
+    gs = fig.add_gridspec(1, 3, wspace=0.5, top=0.82, bottom=0.32)
 
     stripes: dict[str, pd.DataFrame] = {}
     for sid in lib.index:
@@ -547,23 +570,35 @@ def figure5_stripes(lib: pd.DataFrame, results: Path, out: Path) -> None:
     else:
         _empty(ax, "no stripe tables")
 
-    # (b) stripes per mark, normalised for library count
+    # (b) stripe yield against depth, NOT stripes-per-mark.
+    #
+    # A CTCF-vs-H3K27ac dot plot reads as "CTCF anchors yield fewer stripes", and in
+    # this cohort that comparison cannot be made: the two CTCF libraries are also the
+    # two lowest-complexity ones (55-58% PCR duplicates), and stripe count tracks
+    # depth just as loop count does. The honest panel is the confound itself -- plot
+    # yield against depth and let the reader see that CTCF sits where its depth puts
+    # it, not below where its anchor type would.
     ax = fig.add_subplot(gs[0, 1]); _panel_label(ax, "b")
-    if stripes:
-        rec = [{"mark": lib.loc[s, "mark"], "n": len(d)} for s, d in stripes.items() if s in lib.index]
-        df = pd.DataFrame(rec)
-        if not df.empty:
-            for i, (mark, sub) in enumerate(df.groupby("mark")):
-                col = "#8172B2" if mark == "CTCF" else "#CCB974"
-                ax.scatter(np.full(len(sub), i) + np.random.default_rng(0).normal(0, 0.05, len(sub)),
-                           sub["n"], s=16, color=col, edgecolor="black", linewidth=0.3)
-                ax.hlines(sub["n"].median(), i - 0.2, i + 0.2, color="black", lw=1)
-            ax.set_xticks(range(df["mark"].nunique()))
-            ax.set_xticklabels(sorted(df["mark"].unique()))
-            ax.set_ylabel("stripes per library")
-            ax.set_title("Stripes by anchor type", loc="left")
-        else:
-            _empty(ax, "no stripe tables")
+    rec = [
+        {"mark": lib.loc[s, "mark"], "n": len(d), "depth": lib.loc[s, "unique_pairs"]}
+        for s, d in stripes.items()
+        if s in lib.index and not pd.isna(lib.loc[s, "unique_pairs"])
+    ]
+    df = pd.DataFrame(rec)
+    if not df.empty:
+        for mark, sub in df.groupby("mark"):
+            col = "#8172B2" if mark == "CTCF" else "#CCB974"
+            ax.scatter(sub["depth"] / 1e6, sub["n"], s=22, color=col,
+                       edgecolor="black", linewidth=0.3, label=f"{mark} anchors")
+        ax.set_xscale("log")
+        ax.set_xlabel("unique pairs (millions)")
+        ax.set_ylabel("stripes per library")
+        ax.set_title("Stripe yield vs depth", loc="left")
+        ax.legend(frameon=False, loc="upper left")
+        ax.text(0.5, -0.42,
+                "CTCF libraries are also the two lowest-complexity ones;\n"
+                "anchor type and depth are confounded in this cohort.",
+                transform=ax.transAxes, fontsize=5, color=GREY, ha="center", va="top")
     else:
         _empty(ax, "no stripe tables")
 
