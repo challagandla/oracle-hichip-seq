@@ -136,11 +136,22 @@ hicrep:
 # frequency inside the window is a function of distance from the diagonal, so
 # corners at different (j - i) are not comparable to the centre pixel.
 apa:
-  window_size: 20                              # ± 20 bins around loop centre
+  # A 21x21-pixel window at 10 kb -- the standard APA geometry (Rao 2014), not an
+  # arbitrary choice. It was +/-20 bins, which is what forced the distance floor below
+  # up to 410 kb to keep the diagonal out, and 410 kb discards the median loop.
+  window_size: 10                              # ± 10 bins around loop centre
   bin_size: 10000
-  min_loop_dist: 100000
+  # >= (2*window + 1) * bin_size, or the main diagonal sits inside the window and the
+  # aggregate is a picture of the diagonal rather than of the loops. apa_plot enforces
+  # this floor in code and logs how many loops it drops; the value here must satisfy
+  # it or it is raised. At window=10 / bin=10000 the floor is 210 kb.
+  min_loop_dist: 210000
   n_random_controls: 5                         # random-shift controls per loop
   score_min: 1.5                               # centre / random-shift centre
+  # Below this many usable loops the sample is NOT_ASSESSED rather than scored. A
+  # ratio built from one loop cannot fail: Naive_H3K27ac_rep1 keeps a single loop
+  # after the distance filter and scored 4.9 million, reported as a PASS.
+  min_loops_for_apa: 20
 
 # ---------- Differential loops ----------
 # Differential analysis must be stratified by mark, tissue, protocol and batch-aware

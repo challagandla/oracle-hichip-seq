@@ -80,9 +80,19 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         "duplicate_pct": dup_pct <= TH["duplicate_pct_max"],
         "cis_fraction": cis_frac >= TH["cis_fraction_min"],
         "n_loops": n_loops >= TH["n_loops_min"],
-        "apa_score": (apa_score or 0) >= TH["apa_score_min"],
     }
     status_flags = {k: _status(v) for k, v in pass_flags.items()}
+
+    # APA is three-state, like HiCRep: a sample with too few loops to aggregate is
+    # NOT_ASSESSED, not failed. `(apa_score or 0) >= threshold` turned a null score
+    # into a silent 0 and reported it as a FAIL, which reads as "this library's loops
+    # are not real" when the truth is "this library has too few loops to say".
+    if apa_score is None:
+        status_flags["apa_score"] = "NOT_ASSESSED"
+        apa_pass = None
+    else:
+        apa_pass = apa_score >= TH["apa_score_min"]
+        status_flags["apa_score"] = _status(apa_pass)
     if hicrep_best is None:
         status_flags["hicrep_scc"] = "NOT_ASSESSED"
         hicrep_pass = None
@@ -90,7 +100,11 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         hicrep_pass = hicrep_best >= TH["hicrep_scc_min"]
         status_flags["hicrep_scc"] = _status(hicrep_pass)
 
-    hard_pass = all(pass_flags.values()) and (hicrep_pass is not False)
+    hard_pass = (
+        all(pass_flags.values())
+        and (hicrep_pass is not False)
+        and (apa_pass is not False)
+    )
     if not hard_pass:
         overall_status = "FAIL"
     elif "NOT_ASSESSED" in status_flags.values():
@@ -116,7 +130,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     }
     write_json(report, snakemake.output.json)
 
-    apa_line = f"- APA score: **{apa_score:.2f}** (threshold ≥ {TH['apa_score_min']})" if apa_score is not None else "- APA score: **NA**"
+    apa_line = f"- APA score: **{apa_score:.2f}** (threshold ≥ {TH['apa_score_min']})" if apa_score is not None else "- APA score: **NOT_ASSESSED** (too few loops to aggregate)"
     hicrep_line = f"- HiCRep best-replicate SCC: **{hicrep_best:.3f}** (threshold ≥ {TH['hicrep_scc_min']})" if hicrep_best is not None else "- HiCRep best-replicate SCC: **NOT_ASSESSED**"
     md_lines = [
         f"# QC report — {snakemake.wildcards.sample}",

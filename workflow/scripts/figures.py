@@ -217,9 +217,16 @@ def figure1_library_qc(lib: pd.DataFrame, results: Path, out: Path, min_contacts
             continue
         col = "balanced.avg" if "balanced.avg" in e.columns else (
             "count.avg" if "count.avg" in e.columns else None)
-        if col is None or "dist" not in e.columns:
+        # dist_bp, NOT dist. cooltools emits both: `dist` is a count of BINS and
+        # `dist_bp` is that count times the bin size. Plotting `dist` under an axis
+        # labelled "genomic separation (bp)" understated every separation by the bin
+        # size -- at 25 kb the curve ran to 1e4 "bp" when it actually spans ~250 Mb.
+        # The shape of P(s) is unchanged by the rescaling, which is exactly why this
+        # was invisible: the figure looked right.
+        dist_col = "dist_bp" if "dist_bp" in e.columns else None
+        if col is None or dist_col is None:
             continue
-        g = e.groupby("dist")[col].mean()
+        g = e.groupby(dist_col)[col].mean()
         g = g[(g.index > 0) & (g > 0)]
         if g.empty:
             continue

@@ -17,6 +17,7 @@ a pixel (i, j) lies at separation D + (j - i) * bin_size. So corners at differen
 (j - i) are not interchangeable, and averaging all four -- as this did -- puts a
 corner that is 2 * win * bin_size CLOSER to the diagonal into the denominator.
 """
+import logging
 import sys
 from pathlib import Path
 
@@ -26,6 +27,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 from utils import load_loops_bedpe, setup_logging, write_json  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 MAX_SHIFT_BP = 1_000_000
 
@@ -48,23 +51,85 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     bin_sz = int(snakemake.params.bin_size)
     win = int(snakemake.params.window)            # in bins
     win_bp = win * bin_sz
-    min_dist = int(snakemake.params.min_dist)
     n_ctrl = int(snakemake.params.n_ctrl)
+
+    # The main diagonal must not enter the window, or it -- not the loop -- is what
+    # the aggregate shows. A pixel at offset (dy, dx) from a loop of span D sits at
+    # separation D + (dx - dy)*bin, and dx - dy ranges over +/- 2*win, so the diagonal
+    # is inside the window for ANY loop with D <= 2*win*bin. With win=20 at 10 kb that
+    # is every loop shorter than 400 kb -- and the median loop here is 105-175 kb. The
+    # configured floor of 100 kb was therefore guaranteed to admit it: every APA panel
+    # came out as a picture of the diagonal with no corner peak at all, while still
+    # scoring 2-20x "enrichment" because the centre was measured against corners that
+    # were equally contaminated.
+    #
+    # Enforced here rather than trusted from config, so the geometry cannot be broken
+    # again by editing a YAML value.
+    min_dist_floor = (2 * win + 1) * bin_sz
+    min_dist = int(snakemake.params.min_dist)
+    if min_dist < min_dist_floor:
+        log.warning(
+            "apa.min_loop_dist=%d admits the main diagonal into a +/-%d-bin window; "
+            "raising to %d (= (2*%d+1)*%d)",
+            min_dist, win, min_dist_floor, win, bin_sz,
+        )
+        min_dist = min_dist_floor
 
     clr = cooler.Cooler(f"{snakemake.input.mcool}::resolutions/{bin_sz}")
     loops = load_loops_bedpe(snakemake.input.loops)
 
+    n_called = len(loops)
     loops = loops[
         (loops.chrom1 == loops.chrom2) &
         ((loops.start2 - loops.start1).abs() >= min_dist)
     ].reset_index(drop=True)
+    # Never silently. APA describes only the loops long enough to be measurable, and
+    # how many were dropped to get there is part of the result.
+    log.info(
+        "APA on %d/%d loops (span >= %d bp; %d dropped as too short or trans)",
+        len(loops), n_called, min_dist, n_called - len(loops),
+    )
 
-    if len(loops) == 0:
-        write_json({"sample": snakemake.wildcards.sample, "n_loops": 0,
-                    "apa_score": None, "pass": False}, snakemake.output.json)
+    # An aggregate over a handful of loops is not an aggregate. Naive_H3K27ac_rep1
+    # keeps ONE loop after the distance filter, and its "APA" came out at 4.9 million
+    # -- one loop's centre pixel over a random-shift control that happened to land on
+    # empty matrix -- and was reported as a PASS. A ratio computed from a single
+    # observation cannot fail, which makes it worse than no measurement at all. Below
+    # the floor the sample is NOT_ASSESSED: recorded, never passed.
+    min_loops = int(snakemake.config["apa"].get("min_loops_for_apa", 20))
+    if len(loops) < min_loops:
+        log.warning(
+            "only %d loops clear the distance floor (need %d); APA not assessed",
+            len(loops), min_loops,
+        )
+        write_json({
+            "sample": snakemake.wildcards.sample,
+            "n_loops_called": int(n_called),
+            "n_loops_used": int(len(loops)),
+            "min_loops_for_apa": min_loops,
+            "min_loop_dist_used": int(min_dist),
+            "apa_score": None,
+            "apa_vs_random_shift": None,
+            "status": "NOT_ASSESSED",
+            "pass": None,
+            "note": (
+                f"Only {len(loops)} loops span >= {min_dist} bp; an aggregate over "
+                f"fewer than {min_loops} loops reports noise, not enrichment."
+            ),
+        }, snakemake.output.json)
         # The aggregate matrix is an output in its own right: the cohort figure
         # renders APA panels from it, and it must exist even when there is nothing
         # to aggregate, or one loopless sample takes the whole figure stage down.
+        np.save(snakemake.output.npy, np.zeros((2 * win + 1, 2 * win + 1)))
+        plt.figure()
+        plt.title(f"APA not assessed\n{len(loops)} loops (need {min_loops})")
+        plt.savefig(snakemake.output.png)
+        return
+
+    if len(loops) == 0:
+        write_json({"sample": snakemake.wildcards.sample, "n_loops": 0,
+                    "apa_score": None, "status": "NOT_ASSESSED",
+                    "pass": None}, snakemake.output.json)
         np.save(snakemake.output.npy, np.zeros((2 * win + 1, 2 * win + 1)))
         plt.figure(); plt.title("No loops"); plt.savefig(snakemake.output.png); return
 
@@ -144,10 +209,17 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     score_min = float(snakemake.config["apa"]["score_min"])
     write_json({
         "sample": snakemake.wildcards.sample,
+        "n_loops_called": int(n_called),
         "n_loops_used": int(n_used),
+        # The distance floor and the loss it causes travel with the score. An APA of
+        # 3.5 over 14,000 loops and an APA of 3.5 over 60 are not the same statement,
+        # and neither is comparable to one whose window straddled the diagonal.
+        "min_loop_dist_used": int(min_dist),
+        "apa_window_bins": int(win),
         "apa_score": apa,
         "apa_vs_random_shift": apa_vs_ctrl,
         "score_min": score_min,
+        "status": "PASS" if apa_vs_ctrl >= score_min else "FAIL",
         "pass": apa_vs_ctrl >= score_min,
     }, snakemake.output.json)
 

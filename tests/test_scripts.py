@@ -273,3 +273,30 @@ def test_loops_to_edges_empty_result_keeps_2d_attr_shape():
     # and it must actually concatenate against a 2-D adjacency block
     adj_attr = np.zeros((5, 3), dtype=np.float32)
     assert np.concatenate([edge_attr, adj_attr], axis=0).shape == (5, 3)
+
+
+def test_apa_min_dist_floor_keeps_diagonal_out_of_window():
+    """The configured APA distance floor must exclude the main diagonal.
+
+    A pixel at offset (dy, dx) from a loop of span D sits at separation
+    D + (dx - dy) * bin, and dx - dy ranges over +/- 2*window. So the diagonal enters
+    the window for any loop with D <= 2*window*bin. The shipped config used a 100 kb
+    floor with a +/-20-bin window at 10 kb -- admitting every loop under 400 kb, which
+    is the median loop -- and every APA panel came out as a picture of the diagonal.
+    """
+    import yaml
+    cfg = yaml.safe_load((Path(__file__).resolve().parents[1] / "config" / "config.yaml").read_text())
+    win = int(cfg["apa"]["window_size"])
+    binsz = int(cfg["apa"]["bin_size"])
+    floor = int(cfg["apa"]["min_loop_dist"])
+    assert floor >= (2 * win + 1) * binsz, (
+        f"apa.min_loop_dist={floor} admits the diagonal into a +/-{win}-bin window "
+        f"at {binsz} bp; needs >= {(2 * win + 1) * binsz}"
+    )
+
+    # and the geometry the assertion encodes: at the floor, no in-window pixel is on
+    # the diagonal (separation 0)
+    D = floor
+    offs = np.arange(-win, win + 1)
+    seps = D + (offs[None, :] - offs[:, None]) * binsz   # separation at every pixel
+    assert seps.min() > 0, "some pixel in the window sits at or across the diagonal"
