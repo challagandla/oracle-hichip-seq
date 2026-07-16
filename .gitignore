@@ -1,3 +1,12 @@
+# Local-only pipeline workspaces — never commit or push
+instructions/
+data/
+cohorts/
+results/
+config/microbiome_tokens.tsv
+config/local.yaml
+config/*.local.yaml
+
 # Python / VS Code
 __pycache__/
 *.py[cod]
@@ -10,16 +19,43 @@ __pycache__/
 
 # Conda
 .conda/
-# environment.lock.yml IS committed for reproducibility
+
+# Local credentials and shell configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
 
 # Snakemake state
 .snakemake/
-results/
 .snakemake.log
 
 # Raw / derived bioinformatics outputs — never commit
+*.sra
 *.fastq
 *.fastq.gz
+*.fq
+*.fq.gz
+*.fa
+*.fa.gz
+*.fasta
+*.fasta.gz
+*.fna
+*.fna.gz
+*.fai
+*.amb
+*.ann
+*.bwt
+*.pac
+*.sa
+*.0123
+*.gtf
+*.gtf.gz
+*.gff
+*.gff.gz
+*.gff3
+*.gff3.gz
 *.bam
 *.bai
 *.sam
@@ -30,17 +66,30 @@ results/
 *.pairs
 *.pairs.gz
 *.pairsam.gz
+*.px2
 *.allValidPairs
 *.bigWig
+*.bigwig
 *.bw
 *.bedgraph
+*.bedGraph
 *.bdg
+*.bigBed
+*.bb
+*.bedpe
+*.narrowPeak
+*.broadPeak
 *.h5
+*.hdf5
 *.pt
 *.npy
 *.npz
 *.pkl
-data/
+
+# Test fixtures are source, not local pipeline data.
+!/tests/data/
+!/tests/data/**
+
 resources/*
 !resources/
 !resources/download_resources.sh
@@ -72,3 +121,19 @@ desktop.ini
 # Logs
 logs/
 *.log
+slurm-*.out
+
+# Local development and code-intelligence metadata (never commit)
+AGENTS.md
+CLAUDE.md
+MEMORY.md
+memory.md
+handoff*.md
+.claude/
+.codex/
+.agents/
+.gitnexus/
+.graphifyignore
+graphify-out/
+.gitignore.bak-*
+.cache/

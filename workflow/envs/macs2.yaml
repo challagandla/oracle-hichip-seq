@@ -1,8 +1,0 @@
-# MACS2 1D peak calling (stage 04)
-name: oracle-hichip-macs2
-channels:
-  - conda-forge
-  - bioconda
-  - nodefaults
-dependencies:
-  - macs2=2.2.*

@@ -1,0 +1,13 @@
+# Cohort publication figures (stage 11).
+#
+# Separate from envs/pandas.yaml, which is deliberately kept to pandas + numpy for
+# the QC aggregation rules and carries no plotting stack.
+name: oracle-hichip-figures
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pandas=2.2.*
+  - numpy=1.26.*
+  - matplotlib-base=3.8.*

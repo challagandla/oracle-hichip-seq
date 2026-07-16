@@ -1,0 +1,9 @@
+# SRA retrieval (stage 00)
+name: oracle-hichip-sra
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - sra-tools=3.1.*
+  - pigz

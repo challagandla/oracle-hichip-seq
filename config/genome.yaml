@@ -8,8 +8,9 @@ hg38:
   chromsizes:  "resources/hg38/hg38.chrom.sizes"
   gtf:         "resources/hg38/gencode.v46.primary_assembly.annotation.gtf.gz"
   blacklist:   "resources/hg38/hg38-blacklist.v2.bed.gz"
-  digest_bed:  "resources/hg38/MboI.digest.hg38.bed.gz"     # Arima-HiC: GATC, ^GATC
-  enzyme:      "Arima"                                       # MboI + DpnII; HiChIP standard
+  digest_bed:  "resources/hg38/MboI.digest.hg38.bed.gz"
+  enzyme:      "MboI"                                        # GSE101498 protocol; ^GATC
+  macs3_genome_size: "hs"
 
 T2T-CHM13:
   fasta:       "resources/t2t/chm13v2.0.fa"
@@ -19,7 +20,8 @@ T2T-CHM13:
   gtf:         "resources/t2t/chm13v2.0.gtf.gz"
   blacklist:   "resources/t2t/chm13.blacklist.bed.gz"
   digest_bed:  "resources/t2t/MboI.digest.chm13.bed.gz"
-  enzyme:      "Arima"
+  enzyme:      "MboI"
+  macs3_genome_size: "hs"
 
 mm10:
   fasta:       "resources/mm10/mm10.fa"
@@ -29,4 +31,5 @@ mm10:
   gtf:         "resources/mm10/gencode.vM25.annotation.gtf.gz"
   blacklist:   "resources/mm10/mm10-blacklist.v2.bed.gz"
   digest_bed:  "resources/mm10/MboI.digest.mm10.bed.gz"
-  enzyme:      "Arima"
+  enzyme:      "MboI"
+  macs3_genome_size: "mm"

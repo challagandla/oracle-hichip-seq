@@ -1,0 +1,18 @@
+# 1D anchor calling from HiChIP reads (stage 04)
+#
+# MACS3, not MACS2. The bioconda macs2 2.2.x binaries are linked against
+# __log_finite, a libm symbol glibc removed at 2.27, so on any current
+# distribution MACS2 aborts inside `import MACS2.IO.ScoreTrack` with an
+# undefined-symbol ImportError — before it has parsed a single argument. The
+# anchor step could not run at all. MACS3 is the same peak-calling model from the
+# same lab, is maintained, and `callpeak` takes the same flags.
+name: oracle-hichip-macs3
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - macs3=3.0.*
+  - numpy<2
+  - bedtools=2.31.*   # read ends -> BED; MACS3's BAM reader returns 0 tags here
+  - samtools=1.20.*

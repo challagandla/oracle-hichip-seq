@@ -17,9 +17,9 @@ threads:
   bwa: 24
   pairtools: 8
   cooler: 8
-  macs2: 4
+  macs3: 4
   fithichip: 16
-  diffhic: 8
+  stripenn: 8
 
 # ---------- Read QC ----------
 fastp:
@@ -38,28 +38,64 @@ pairtools:
   min_mapq: 30
   walks_policy: "mask"                         # mask walk pair-types (5end3 etc)
   keep_pair_types: ["UU"]                      # uniquely mapped pairs only
+  filter_restriction_artifacts: true           # remove neighbouring-fragment DE/SC/mirror pairs from contact maps
+
+# ---------- Cohort-independent QC gates ----------
+# These are screening heuristics, not universal biological laws. Loop/stripe/peak
+# counts are intentionally descriptive because their expected yield depends on the
+# target, caller, depth, search space, and biology.
+qc_thresholds:
+  valid_pair_yield_pct: 25.0                   # valid-ligation UU / raw sequenced read pairs
+  duplicate_pct_max: 50.0                      # pairtools duplicates / mapped pairs
+  cis_fraction_min: 0.70                       # cis / final valid-ligation UU
 
 # ---------- cooler ----------
 cooler:
   bin_sizes_kb: [5, 10, 25, 50, 100, 250, 500, 1000, 2500]
   oracle_bin_sizes_kb: [5, 25, 100, 1000]      # the 4 ORACLE hierarchy levels
   balance:
+    weight_name: "weight"                       # cooler ICE dataset; convergence comes from its HDF5 attrs
     ignore_diags: 2
     min_nnz: 10
     mad_max: 5
-    cis_only: false
+    tolerance: 1.0e-5                         # marginal-variance convergence target
+    max_iterations: 200                       # nonconverged weights are reported, then removed
 
-# ---------- MACS2 peak calling (per histone mark) ----------
-macs2:
-  genome_size: "hs"                            # hs | mm | dm | ce
+# ---------- Anchor calling (MACS3, per mark) ----------
+# Anchors are called from the HiChIP library itself; no companion ChIP-seq needed.
+#
+# Narrow versus broad mode follows the expected signal geometry. H3K4me1 is
+# treated as broad because it forms wide shoulders around nucleosome-depleted
+# enhancer regions rather than punctate summits.
+#
+# Acetylation and H3K4me3 are punctate and stay narrow — calling H3K27ac with
+# --broad fuses adjacent enhancers into multi-kb blocks, which for HiChIP is
+# actively harmful: the anchors are what loops are anchored on, so fused anchors
+# merge distinct enhancer-promoter contacts into one uninterpretable loop.
+macs3:
+  # HiChIP read ends are ligation partners, not the two ends of one sonicated
+  # fragment: they routinely sit megabases apart or on different chromosomes. So
+  # the anchors are called from the read ends treated INDIVIDUALLY, each extended
+  # to a nucleosome, rather than as pairs. FitHiChIP's own peak inference does the
+  # same (`--nomodel --extsize 147`).
+  extsize: 147
   marks:
     H3K4me3:   { mode: "narrow", q: 0.01 }
-    H3K4me1:   { mode: "narrow", q: 0.01 }
+    H3K4me1:   { mode: "broad",  q: 0.05, broad_cutoff: 0.1 }
     H3K27ac:   { mode: "narrow", q: 0.01 }
     H3K27me3:  { mode: "broad",  q: 0.05, broad_cutoff: 0.1 }
     H3K36me2:  { mode: "broad",  q: 0.05, broad_cutoff: 0.1 }
     H3K36me3:  { mode: "broad",  q: 0.05, broad_cutoff: 0.1 }
     CTCF:      { mode: "narrow", q: 0.01 }
+    SMC1A:     { mode: "narrow", q: 0.01 }     # cohesin
+    RAD21:     { mode: "narrow", q: 0.01 }     # cohesin
+
+# Build one common peak search space within an assay stratum, while pooling across
+# the biological conditions that may be compared. This prevents unrelated tissues
+# or protocols that happen to share a mark from contaminating each other's FRiP and
+# FitHiChIP background. Do not add a comparison variable such as cell_type here.
+anchor_consensus:
+  group_by: [mark, tissue, library_protocol, restriction_enzyme]
 
 # ---------- FitHiChIP loop calling ----------
 fithichip:
@@ -69,57 +105,189 @@ fithichip:
   fdr_threshold: 0.01
   interaction_type: "Peak-to-ALL"              # human-readable label for reports
   background_type: "Coverage_Bias"             # human-readable label for reports
-  # FitHiChIP native codes. Keeping them explicit avoids silent mismatch between
-  # human labels and FitHiChIP's historical INI keys.
-  int_type_code: 3                              # current project default: Peak-to-ALL
-  bias_type_code: 1                             # coverage-bias correction
   use_p2p_background: 1
-  min_reads: 6                                  # downstream reporting threshold
+  min_reads: 6                                  # minimum contact count retained in the primary loop table
+  # Take FitHiChIP's MergeNearContacts call set. It groups nearby significant bins
+  # but can retain multiple representative rows for one connected neighbourhood;
+  # it must not be described as exactly one row per biological loop. The workflow's
+  # later reciprocal-anchor clustering reconciles residual +/-1-bin jitter.
+  #
+  # Setting MergeInt=1 alone is NOT enough -- that only makes FitHiChIP write the
+  # merged file; you have to read it.
+  merge_nearby: true
 
 # ---------- Replicate QC ----------
+# Replicate strata are configured explicitly below (see rules/06_loop_qc.smk).
+#
+# HiCRep downsamples the deeper library to the shallower contact count, so low-depth
+# pairs are reported as depth-confounded and do not decide PASS/FAIL. The SCC
+# threshold is a cohort screening heuristic, not a universal HiChIP standard.
 hicrep:
+  # These columns define a biological replicate group. Subject and replicate are
+  # intentionally excluded: different donors within one otherwise identical
+  # biological condition are the replicates to compare.
+  group_by: [cell_type, tissue, disease, cancer_type, mark, library_protocol, restriction_enzyme]
   bin_size: 25000                              # 25 kb is HiCRep's sweet spot
   max_dist: 5000000                            # 5 Mb stratification
   h_smooth: 1
-  threshold_pass: 0.85                         # SCC ≥ 0.85 to call replicates concordant
+  threshold_pass: 0.70                         # sanity floor, not a concordance claim
+  min_contacts_for_scc: 10000000               # below this, SCC reports depth
 
 # ---------- APA ----------
+# APA is a descriptive held-out effect size, not a universal pass/fail gate. Each
+# random-shift control preserves chromosome and distance, matches sibling-anchor
+# class and caller-space marginal visibility, and must have a usable matrix window.
+# The corner ratio is reported too, but corners at different (j - i) are not
+# comparable to the centre pixel because contact frequency decays with distance.
 apa:
-  window_size: 20                              # ± 20 bins around loop centre
+  # A 21x21-pixel window at 10 kb. The matching distance floor below keeps the
+  # main diagonal outside the aggregate window.
+  window_size: 10                              # ± 10 bins around loop centre
   bin_size: 10000
-  min_loop_dist: 100000
-  n_random_controls: 5                         # random-shift controls per loop
+  # Q-filtered MergeNearContacts calls can represent the same reported loop one
+  # native FitHiChIP bin apart between donors. This reconciliation is for APA
+  # candidate replication only; the differential hypothesis grid remains exact.
+  candidate_tolerance_bins: 1
+  # >= (2*window + 1) * bin_size, or the main diagonal sits inside the window and the
+  # aggregate is a picture of the diagonal rather than of the loops. apa_plot enforces
+  # this floor in code and logs how many loops it drops; the value here must satisfy
+  # it or it is raised. At window=10 / bin=10000 the floor is 210 kb.
+  min_loop_dist: 210000
+  n_random_controls: 20                        # matched random shifts per loop
+  # Shifted-anchor cis marginals in the FitHiChIP distance range must be within
+  # this many log2 units of the real anchors (1.5 is about 2.8-fold).
+  control_marginal_log2_tolerance: 1.5
+  max_control_attempts_per_draw: 200
+  # Below this many usable loops the sample is NOT_ASSESSED rather than scored;
+  # very small aggregates do not provide stable enrichment estimates.
+  min_loops_for_apa: 20
 
 # ---------- Differential loops ----------
 # Differential analysis must be stratified by mark, tissue, protocol and batch-aware
-# where possible. Leave comparisons empty until real matched case/control samples
-# exist for the same mark and tissue class.
+# where possible. The bundled comparisons are valid only for the matched example
+# cohort; replace or remove them when using another study.
 differential:
   fdr: 0.05
   log2fc_min: 1.0
-  method: "pyDESeq2"                           # pyDESeq2 | diffhic_r
-  comparisons: []
-  # Example once matched H3K27ac controls exist:
-  # comparisons:
-  #   - name: ovarian_tumor_vs_adjacent_H3K27ac
-  #     mark: H3K27ac
-  #     case_filter:    { tissue: tumor, disease: ovarian_HGSOC, library_protocol: HiChIP_v2 }
-  #     control_filter: { tissue: adjacent_normal, disease: non_cancer, library_protocol: HiChIP_v2 }
+  method: "pyDESeq2"
+  # The tested universe starts from FitHiChIP's unmerged
+  # PREFIX.interactions_FitHiC.bed table. Per-library q-filtered calls are used
+  # for reporting and APA only; changing this source would outcome-select tests.
+  hypothesis_source: "fithichip_all_interactions"
+  paired_by: "subject_id"                      # fits ~ subject_id + condition
+  covariates: []                               # add non-confounded batch columns here
+  candidate_tolerance_bins: 0                  # exact hypothesis pixels; intentionally unlike APA's +/-1 reconciliation
+  min_count: 5                                 # label-blind raw-count prefilter
+  min_samples: 2
+  publication_min_complete_pairs: 3            # two complete pairs remain pilot evidence
+  require_publication_ready: false             # true makes underpowered contrasts fail fast
+  # CD4+ T-helper subsets, same mark (H3K27ac), same protocol, same donors.
+  # Th17 vs Treg is the substantive axis: the two subsets are developmentally
+  # adjacent and reciprocally polarising, and the autoimmune GWAS variants that
+  # motivate this dataset fall in enhancers whose target genes differ between
+  # them. Naive is the common ancestor and serves as the reference for both.
+  #
+  # CTCF is deliberately absent from every comparison. It exists in this cohort in
+  # naive cells only, so there is no contrast to make, and comparing loops called
+  # on a CTCF anchor set against loops called on an H3K27ac anchor set would
+  # compare anchor definitions rather than biology.
+  comparisons:
+    - name: Th17_vs_Naive_H3K27ac
+      mark: H3K27ac
+      include_subjects: [donor2, donor3]       # published-style complete pairs; B1 is QC-only
+      case_filter:    { cell_type: Th17 }
+      control_filter: { cell_type: Naive }
+    - name: Treg_vs_Naive_H3K27ac
+      mark: H3K27ac
+      include_subjects: [donor2, donor3]
+      case_filter:    { cell_type: Treg }
+      control_filter: { cell_type: Naive }
+    - name: Th17_vs_Treg_H3K27ac
+      mark: H3K27ac
+      include_subjects: [donor2, donor3]
+      case_filter:    { cell_type: Th17 }
+      control_filter: { cell_type: Treg }
+
+# ---------- Secondary loop-caller cross-check ----------
+# Mustache is deliberately secondary: FitHiChIP models HiChIP-specific 1D anchor
+# bias, whereas Mustache asks whether scale-space enrichment is independently visible.
+mustache:
+  enabled: true
+  resolution: 10000
+  comparison_tolerance_bins: 1                # caller concordance allows +/-1 bin per anchor
+
+# ---------- Architectural stripes ----------
+# Stripes (architectural / flame patterns) are the signature of one anchor
+# reeling in a whole domain by loop extrusion, and they are not recoverable from
+# a loop list: a loop caller tests discrete pixel pairs, whereas a stripe is a
+# continuous line of enrichment anchored at one end.
+#
+# Read on a well-powered CTCF/cohesin anchor set they can support an extrusion
+# interpretation. On H3K27ac they are weaker and are reported, not leaned on.
+# Never compare stripe yield between marks unless library complexity and unique
+# cis-pair depth are matched: anchor class, enrichment and depth are otherwise
+# inseparable. In the bundled example cohort, CTCF is present only in naive cells,
+# so its stripe output is a technical demonstration, not a CTCF-vs-H3K27ac test.
+stripes:
+  enabled: true
+  resolution: 10000                             # 10 kb; 5 kb is too sparse per-pixel
+  max_pixel_pval: 0.1
+  # min_length / max_width are given in BASE PAIRS here and converted to bins by the
+  # rule. stripenn's own --minL/--maxW are in BINS, not bp: minL feeds minH, and maxW
+  # is compared against bin indices (`abs(m - n) <= self.maxW`). Passing bp straight
+  # through asked for a 200 Mb minimum stripe length -- longer than any human
+  # chromosome -- so nothing could ever be called.
+  #
+  # The values are stripenn's validated defaults (minL=10 bins, maxW=8 bins) restated
+  # at this resolution. 100 kb is also the right floor biologically: a stripe shorter
+  # than that is not distinguishable from the loop it is anchored on.
+  min_length: 100000                            # 10 bins at 10 kb
+  max_width: 80000                              # 8 bins at 10 kb
+  canny_sigma: 2.0
+  # Stripenn is run on raw counts explicitly.
+  #
+  # stripenn is an IMAGE method: it saturates the contact map at a percentile, clips
+  # to [0,1] and runs Canny edge detection. cooler's ICE balancing leaves NaN in
+  # unmappable bins as NaN; those NaNs can suppress Canny edge detection. Stripenn's
+  # own matrix handle is `unbalLib`, and
+  # it controls coverage bias with the per-chromosome percentile saturation plus a
+  # background null model and a p-value, not by balancing the matrix.
+  #
+  # Its default KR label is not a column in cooler-balanced files and falls back to
+  # raw counts. Naming None makes that choice explicit and stable.
+  norm: "None"
+
+# ---------- Reporting roles ----------
+# Every library is processed and remains visible in the QC figures and tables.
+# These CTCF libraries are an unmatched technical arm, so the headline stripe
+# summary excludes them instead of inviting an invalid CTCF-vs-H3K27ac contrast.
+reporting:
+  demonstration_samples: [Naive_CTCF_rep1, Naive_CTCF_rep2]
 
 # ---------- Visualisation regions of interest ----------
+# Example lineage-relevant loci for visual review in the bundled CD4 T-cell cohort.
+# Absence of an expected-looking contact at one locus is not, by itself, a library
+# QC failure or evidence about cell polarization.
+#
+# Region coordinates are the GENCODE v46 gene body padded by 500 kb. Each
+# viewpoint is the gene's transcription-start base in 0-based hg38 coordinates,
+# resolved from that same GTF. Keeping the viewpoint explicit prevents virtual
+# 4C from silently using the middle of a megabase-wide plotting window.
 viz:
+  assembly: "hg38"                              # coordinates below; replace with loci for another assembly
   regions:
-    - { name: "MYC_locus",   chrom: "chr8",  start: 126500000, end: 129500000 }
-    - { name: "BCL2_locus",  chrom: "chr18", start: 60500000,  end: 63500000 }
-    - { name: "NSD1_locus",  chrom: "chr5",  start: 176000000, end: 177500000 }
-    - { name: "PPARG_locus", chrom: "chr3",  start: 12200000,  end: 12550000 }
+    - { name: "RORC_locus",  chrom: "chr1",  start: 151306071, end: 152331845, viewpoint: 151831844, viewpoint_label: "RORC TSS" }   # Th17 master TF, minus strand
+    - { name: "IL17A_locus", chrom: "chr6",  start: 51686375,  end: 52690638,  viewpoint: 52186374,  viewpoint_label: "IL17A TSS" }  # Th17 effector, plus strand
+    - { name: "FOXP3_locus", chrom: "chrX",  start: 48750438,  end: 49764800,  viewpoint: 49264799,  viewpoint_label: "FOXP3 TSS" }  # Treg master TF, minus strand
+    - { name: "IL2RA_locus", chrom: "chr10", start: 5510689,   end: 6562370,   viewpoint: 6062369,   viewpoint_label: "IL2RA TSS" }  # Treg/CD25, minus strand
+    - { name: "CTLA4_locus", chrom: "chr2",  start: 203353888, end: 204373965, viewpoint: 203853887, viewpoint_label: "CTLA4 TSS" }  # Treg effector, plus strand
+    - { name: "MYC_locus",   chrom: "chr8",  start: 127235434, end: 128242951, viewpoint: 127735433, viewpoint_label: "MYC TSS" }   # shared control, plus strand
 
 # ---------- ORACLE COS export ----------
 oracle_export:
-  output_format: "pyg"                         # pyg | h5
-  emit_bigwigs: true                           # reserved for future signal-channel expansion
   # The ENCODE blacklist is taken from config/genome.yaml (per-assembly `blacklist`),
   # so it stays consistent with the chosen assembly. Bins overlapping blacklist
-  # regions have their peak-overlap node feature zeroed during COS export.
-  microbiome_metadata_tsv: "config/microbiome_tokens.tsv"   # optional; one row per sample
-  drop_chromosomes: ["chrM", "chrY"]
+  # regions have every unobserved feature cell zero-filled and masked during COS export.
+  microbiome_metadata_tsv: ""                    # optional; one unique row per sample
+  primary_chromosomes_only: true               # chr1-22/X; exclude alts/unplaced/Y/MT
+  drop_chromosomes: ["chrM", "chrY"]          # extra exclusions if primary-only is disabled

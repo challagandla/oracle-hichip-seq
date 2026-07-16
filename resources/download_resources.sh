@@ -8,7 +8,7 @@ RESOURCES_DIR="${ROOT_DIR}/resources"
 usage() {
     cat <<'EOF'
 Usage:
-  bash resources/download_resources.sh hg38 [mm10 ...]
+  bash prepare_references.sh hg38 [mm10 ...]
 
 Supported assemblies:
   hg38  Human GRCh38 primary assembly, GENCODE v46, ENCODE blacklist
@@ -19,20 +19,38 @@ EOF
 download() {
     local url="$1"
     local dest="$2"
+    local checksum="$3"
+    local algorithm="$4"
+    local actual part
     mkdir -p "$(dirname "${dest}")"
     if [[ -s "${dest}" ]]; then
-        echo "exists: ${dest}"
-        return
+        actual="$(${algorithm}sum "${dest}" | awk '{print $1}')"
+        if [[ "$actual" == "$checksum" ]]; then
+            echo "verified: ${dest}"
+            return
+        fi
+        echo "invalid checksum; replacing: ${dest}" >&2
+        rm -f "${dest}"
     fi
     echo "download: ${url}"
+    part="${dest}.part"
+    rm -f "$part"
     if command -v curl >/dev/null 2>&1; then
-        curl -L --fail --retry 3 -o "${dest}" "${url}"
+        curl -L --fail --retry 3 -o "$part" "${url}"
     elif command -v wget >/dev/null 2>&1; then
-        wget -O "${dest}" "${url}"
+        wget -O "$part" "${url}"
     else
         echo "ERROR: curl or wget is required." >&2
         exit 1
     fi
+    actual="$(${algorithm}sum "$part" | awk '{print $1}')"
+    [[ "$actual" == "$checksum" ]] || {
+        rm -f "$part"
+        echo "ERROR: checksum failed for ${url}" >&2
+        exit 1
+    }
+    [[ "$dest" != *.gz ]] || gzip -t "$part"
+    mv "$part" "$dest"
 }
 
 decompress_fasta() {
@@ -43,7 +61,9 @@ decompress_fasta() {
         return
     fi
     echo "decompress: ${gz}"
-    gzip -dc "${gz}" > "${fasta}"
+    gzip -dc "${gz}" > "${fasta}.part"
+    [[ -s "${fasta}.part" ]] || { rm -f "${fasta}.part"; exit 1; }
+    mv "${fasta}.part" "${fasta}"
 }
 
 index_reference() {
@@ -51,16 +71,33 @@ index_reference() {
     local bwa_prefix="$2"
     local bwamem2_prefix="$3"
 
-    if command -v samtools >/dev/null 2>&1 && [[ ! -s "${fasta}.fai" ]]; then
+    # Say which indexer is missing rather than skipping in silence. A skipped index
+    # does not fail here — it fails hours later, inside the first alignment job,
+    # as a missing-input error that points at the index rather than at this script.
+    if ! command -v samtools >/dev/null 2>&1; then
+        echo "ERROR: samtools not on PATH; cannot faidx ${fasta}." >&2
+        exit 1
+    fi
+    if ! command -v bwa >/dev/null 2>&1 && ! command -v bwa-mem2 >/dev/null 2>&1; then
+        echo "ERROR: neither bwa nor bwa-mem2 on PATH; no aligner index can be built." >&2
+        echo "       Install one and rerun, or the alignment stage will fail." >&2
+        exit 1
+    fi
+
+    if [[ ! -s "${fasta}.fai" ]]; then
         samtools faidx "${fasta}"
     fi
 
     mkdir -p "$(dirname "${bwa_prefix}")" "$(dirname "${bwamem2_prefix}")"
     if command -v bwa >/dev/null 2>&1 && [[ ! -s "${bwa_prefix}.bwt" ]]; then
         bwa index -p "${bwa_prefix}" "${fasta}"
+    else
+        echo "note: skipping bwa index (bwa not on PATH or index present)."
     fi
     if command -v bwa-mem2 >/dev/null 2>&1 && [[ ! -s "${bwamem2_prefix}.0123" ]]; then
         bwa-mem2 index -p "${bwamem2_prefix}" "${fasta}"
+    else
+        echo "note: skipping bwa-mem2 index (bwa-mem2 not on PATH or index present)."
     fi
 }
 
@@ -98,9 +135,9 @@ write_digest() {
 download_hg38() {
     local dir="${RESOURCES_DIR}/hg38"
     local fasta="${dir}/GRCh38.primary_assembly.genome.fa"
-    download "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_46/GRCh38.primary_assembly.genome.fa.gz" "${fasta}.gz"
-    download "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_46/gencode.v46.primary_assembly.annotation.gtf.gz" "${dir}/gencode.v46.primary_assembly.annotation.gtf.gz"
-    download "https://raw.githubusercontent.com/Boyle-Lab/Blacklist/master/lists/hg38-blacklist.v2.bed.gz" "${dir}/hg38-blacklist.v2.bed.gz"
+    download "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_46/GRCh38.primary_assembly.genome.fa.gz" "${fasta}.gz" "a445fcadf36bcbf1cdd7839ff2c8bf95" md5
+    download "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_46/gencode.v46.primary_assembly.annotation.gtf.gz" "${dir}/gencode.v46.primary_assembly.annotation.gtf.gz" "b4dd7c18c24c28d083a9418cd001dcfe" md5
+    download "https://raw.githubusercontent.com/Boyle-Lab/Blacklist/61a04d2c5e49341d76735d485c61f0d1177d08a8/lists/hg38-blacklist.v2.bed.gz" "${dir}/hg38-blacklist.v2.bed.gz" "c92e763af17271446194991e71917ac220593a5a3d40a06667be24178ef08cf2" sha256
     decompress_fasta "${fasta}.gz" "${fasta}"
     index_reference "${fasta}" "${dir}/bwa_index/GRCh38.primary_assembly.genome.fa" "${dir}/bwamem2_index/GRCh38.primary_assembly.genome.fa"
     write_chromsizes "${fasta}" "${dir}/hg38.chrom.sizes"
@@ -110,9 +147,9 @@ download_hg38() {
 download_mm10() {
     local dir="${RESOURCES_DIR}/mm10"
     local fasta="${dir}/mm10.fa"
-    download "https://hgdownload.soe.ucsc.edu/goldenPath/mm10/bigZips/mm10.fa.gz" "${fasta}.gz"
-    download "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M25/gencode.vM25.annotation.gtf.gz" "${dir}/gencode.vM25.annotation.gtf.gz"
-    download "https://raw.githubusercontent.com/Boyle-Lab/Blacklist/master/lists/mm10-blacklist.v2.bed.gz" "${dir}/mm10-blacklist.v2.bed.gz"
+    download "https://hgdownload.soe.ucsc.edu/goldenPath/mm10/bigZips/mm10.fa.gz" "${fasta}.gz" "db005b65828db31735f384e4c5787be5" md5
+    download "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M25/gencode.vM25.annotation.gtf.gz" "${dir}/gencode.vM25.annotation.gtf.gz" "0c38fc4ccbc731a2708fc91e7f1c2efd" md5
+    download "https://raw.githubusercontent.com/Boyle-Lab/Blacklist/61a04d2c5e49341d76735d485c61f0d1177d08a8/lists/mm10-blacklist.v2.bed.gz" "${dir}/mm10-blacklist.v2.bed.gz" "febafb843c6df492f9a9fc418f8796762ee899d9864330fb509ae2d38ddc0b46" sha256
     decompress_fasta "${fasta}.gz" "${fasta}"
     index_reference "${fasta}" "${dir}/bwa_index/mm10.fa" "${dir}/bwamem2_index/mm10.fa"
     write_chromsizes "${fasta}" "${dir}/mm10.chrom.sizes"

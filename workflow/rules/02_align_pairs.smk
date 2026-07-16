@@ -6,7 +6,18 @@
 
 BWA_BIN = "bwa-mem2" if config["bwa"]["use_bwamem2"] else "bwa"
 BWA_IDX = GENOME["bwamem2_index"] if config["bwa"]["use_bwamem2"] else GENOME["bwa_index"]
+BWA_INDEX_FILES = (
+    [f"{BWA_IDX}{suffix}" for suffix in (".0123", ".amb", ".ann", ".bwt.2bit.64", ".pac")]
+    if config["bwa"]["use_bwamem2"]
+    else [f"{BWA_IDX}{suffix}" for suffix in (".amb", ".ann", ".bwt", ".pac", ".sa")]
+)
 PAIRTOOLS_KEEP_EXPR = " or ".join(f'pair_type=="{pt}"' for pt in config["pairtools"]["keep_pair_types"])
+PAIRTOOLS_VALID_LIGATION_EXPR = (
+    "(rfrag1 >= 0) and (rfrag2 >= 0) and "
+    "((chrom1 != chrom2) or (abs(rfrag1 - rfrag2) > 1))"
+    if config["pairtools"].get("filter_restriction_artifacts", True)
+    else "True"
+)
 
 rule bwa_align_sort_pairs:
     """
@@ -17,9 +28,12 @@ rule bwa_align_sort_pairs:
     input:
         r1 = RESULTS / "trimmed/{sample}_R1.trim.fastq.gz",
         r2 = RESULTS / "trimmed/{sample}_R2.trim.fastq.gz",
-        chromsizes = GENOME["chromsizes"]
+        chromsizes = GENOME["chromsizes"],
+        digest = GENOME["digest_bed"],
+        index = BWA_INDEX_FILES,
     output:
-        pairsam = RESULTS / "pairs/{sample}.sorted.pairsam.gz"
+        # This large sorted intermediate is consumed only by pairtools_dedup.
+        pairsam = temp(RESULTS / "pairs/{sample}.sorted.pairsam.gz")
     params:
         idx = BWA_IDX,
         bwa = BWA_BIN,
@@ -38,7 +52,10 @@ rule bwa_align_sort_pairs:
             --min-mapq {params.min_mapq} \
             --walks-policy {params.walks} \
             --add-columns mapq | \
-          # SAM kept so pairtools split can emit a 1D BAM for MACS2 in stage 04.
+          # Annotate the MboI fragment at each end. These columns support explicit
+          # dangling-end/self-circle QC while leaving the contact set unchanged.
+          pairtools restrict --frags {input.digest} | \
+          # SAM kept so pairtools split can emit a 1D BAM for MACS3 in stage 04.
           pairtools sort --nproc {threads} \
               --tmpdir "${{TMPDIR:-/tmp}}" \
               -o {output.pairsam}) \
@@ -49,18 +66,25 @@ rule pairtools_dedup:
     """
     Deduplicate at pair-level (NOT read-level). Picard MarkDuplicates is wrong
     for HiC/HiChIP; always use pairtools dedup.
-    Emits clean dedup pairs + duplicate stats for QC.
+    Emits restriction-filtered UU contacts, their pairix index, and duplicate
+    statistics with explicit denominators for QC.
     """
     input:
         pairsam = RESULTS / "pairs/{sample}.sorted.pairsam.gz"
     output:
         pairs = RESULTS / "pairs/{sample}.dedup.pairs.gz",
-        pairsam_dedup = RESULTS / "pairs/{sample}.dedup.pairsam.gz",
+        index = RESULTS / "pairs/{sample}.dedup.pairs.gz.px2",
+        # Pre-filter UU contacts are retained until restriction QC completes.
+        all_pairs = temp(RESULTS / "pairs/{sample}.dedup.UU.pairs.gz"),
+        # This pairsam is consumed only by the 1D BAM extraction stage.
+        pairsam_dedup = temp(RESULTS / "pairs/{sample}.dedup.pairsam.gz"),
         stats = RESULTS / "qc/pairtools/{sample}.dedup.stats.txt",
-        unmapped = RESULTS / "pairs/{sample}.unmapped.pairs.gz"
+        # Only the unmapped count is retained in the statistics report.
+        unmapped = temp(RESULTS / "pairs/{sample}.unmapped.pairs.gz")
     threads: config["threads"]["pairtools"]
     params:
-        keep_expr = PAIRTOOLS_KEEP_EXPR
+        keep_expr = PAIRTOOLS_KEEP_EXPR,
+        valid_ligation_expr = PAIRTOOLS_VALID_LIGATION_EXPR,
     conda: "../envs/align.yaml"
     log:
         RESULTS / "logs/pairtools_dedup/{sample}.log"
@@ -81,16 +105,31 @@ rule pairtools_dedup:
             --output-rest /dev/null \
             --output - \
             {output.pairsam_dedup} 2>> {log} | \
-        pairtools split --output-pairs {output.pairs} - 2>> {log}
+        pairtools split --output-pairs {output.all_pairs} - 2>> {log}
 
-        # Step 3: index the .pairs.gz with pairix (required by cooler cload pairix)
+        # Community-default contact maps exclude neighbouring-fragment dangling
+        # ends, self-circles, same-strand mirror pairs, and unassigned fragments.
+        # The unfiltered UU set remains available to restriction QC and 1D peak
+        # calling still uses the deduplicated pairsam above.
+        pairtools select \
+            --type-cast rfrag1 int --type-cast rfrag2 int \
+            --cmd-out "bgzip -c -@ {threads}" \
+            --output-rest /dev/null --output {output.pairs} \
+            '{params.valid_ligation_expr}' {output.all_pairs} 2>> {log}
+
+        # Step 3: index the explicitly BGZF-compressed valid-ligation pairs. Do
+        # not rely on pairtools' compressor auto-detection: some pbgzip builds
+        # emit ordinary gzip, which pairix cannot index.
+        test -s {output.pairs}
         pairix -f -p pairs {output.pairs} 2>> {log}
+        test -s {output.index}
         """
 
 rule pairtools_stats:
     """
-    Per-sample pair statistics: cis/trans, distance-decay categories,
-    duplicate fraction, valid-pair yield.
+    Per-sample selected-contact statistics: cis/trans and distance categories.
+    Raw valid-pair yield and duplicate rate are assembled later from their exact
+    fastp and pairtools-dedup denominator populations.
     """
     input:
         pairs = RESULTS / "pairs/{sample}.dedup.pairs.gz"
@@ -104,3 +143,17 @@ rule pairtools_stats:
         r"""
         pairtools stats {input.pairs} -o {output.stats} 2> {log}
         """
+
+
+rule restriction_fragment_qc:
+    """Report pre-filter fragment classes and retained valid-ligation yield."""
+    input:
+        pairs = RESULTS / "pairs/{sample}.dedup.UU.pairs.gz",
+        shared_code = SHARED_SCRIPT_DEPS,
+    output:
+        json = RESULTS / "qc/restriction/{sample}.restriction.json",
+    conda: "../envs/pandas.yaml"
+    log:
+        RESULTS / "logs/restriction_qc/{sample}.log",
+    script:
+        "../scripts/restriction_fragment_qc.py"

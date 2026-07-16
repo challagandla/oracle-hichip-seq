@@ -1,6 +1,6 @@
 # ORACLE COS export: PyTorch Geometric graph + HDF5 mirror (stage 09)
-# torch/pyg import is guarded in the script, but the env provides them for the
-# full .pt export. CPU-only users can drop pytorch-cuda from environment.yml.
+# torch/pyg import is guarded in the script, and this tested rule environment
+# provides a CPU-safe build for the full .pt export.
 name: oracle-hichip-export
 channels:
   - pytorch

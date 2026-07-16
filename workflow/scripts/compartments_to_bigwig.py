@@ -1,6 +1,4 @@
 """Export the E1 eigenvector (A/B compartments) to bigWig."""
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 
@@ -16,7 +14,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     out = Path(snakemake.output.bw)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    sizes = read_chromsizes(snakemake.params.chromsizes)
+    sizes = read_chromsizes(snakemake.input.chromsizes)
     df = pd.read_csv(snakemake.input.eigs, sep="\t")
     if "E1" not in df.columns:
         raise ValueError(f"{snakemake.input.eigs} does not contain an E1 column")
@@ -37,4 +35,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     bw.close()
 
 
-main(snakemake)  # type: ignore[name-defined]  # noqa: F821
+# Guarded so the module can be imported by the tests. Snakemake injects
+# `snakemake` into the script's globals before executing it.
+if "snakemake" in globals():
+    main(snakemake)  # type: ignore[name-defined]  # noqa: F821

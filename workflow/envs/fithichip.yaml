@@ -1,8 +1,39 @@
 # FitHiChIP loop calling (stage 05)
+#
+# FitHiChIP is distributed as shell, R, and Python scripts rather than a bioconda
+# package. This file pins its dependency set; the workflow fetches the checksummed
+# upstream tag separately.
+#
+# MACS2 is unnecessary because the workflow supplies a precomputed PeakFile.
 name: oracle-hichip-fithichip
 channels:
   - conda-forge
   - bioconda
   - nodefaults
 dependencies:
-  - fithichip
+  - python=3.10
+  - numpy<2
+  - scipy
+  - networkx
+  - pysam
+  - bx-python
+  - cooler=0.9.*
+  - bedtools=2.31.*
+  - samtools=1.20.*
+  - htslib=1.20.*
+  - bc
+  - gawk
+  - coreutils
+  - curl
+  - r-base=4.3.*
+  - r-optparse
+  - r-ggplot2
+  - r-data.table
+  - r-fdrtool
+  - r-plyr
+  - r-dplyr
+  - r-rcolorbrewer
+  - bioconductor-genomicranges
+  - bioconductor-edger
+  # FitHiChIP shells out to bedToBigBed for browser tracks.
+  - ucsc-bedtobigbed

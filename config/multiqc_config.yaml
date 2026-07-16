@@ -2,95 +2,27 @@
 # Place this file at the repository root or pass with `multiqc --config`.
 
 title: "ORACLE HiChIP QC Report"
-subtitle: "End-to-end HiChIP QC — fastp · pairtools · cooler · FitHiChIP · APA · HiCRep"
+subtitle: "Contacts · matrix balance · assay-stratum anchors · filtered loops · held-out APA · categorical HiCRep"
 
-# ── Custom content: loop QC JSON files ───────────────────────────────────────
-# MultiQC parses these automatically when custom_data is configured.
-custom_data:
-  loop_qc:
-    id: "loop_qc"
-    section_name: "Loop QC Summary"
-    description: >
-      Per-sample loop QC aggregating valid-pair yield, duplicate rate,
-      cis-fraction, loop count, APA score, and HiCRep replicate concordance.
-      Status: PASS / FAIL / PASS_WITH_NOT_ASSESSED (single-replicate HiCRep).
-    plot_type: "table"
-    pconfig:
-      id: "loop_qc_table"
-      title: "Loop QC"
-    headers:
-      valid_pair_yield_pct:
-        title: "Valid pair yield (%)"
-        description: "UU pairs after dedup / total input pairs × 100"
-        min: 0
-        max: 100
-        suffix: "%"
-        scale: "RdYlGn"
-      duplicate_pct:
-        title: "Duplicate (%)"
-        description: "Duplicate pairs / total pairs × 100"
-        min: 0
-        max: 100
-        suffix: "%"
-        scale: "RdYlGn_r"
-      cis_fraction:
-        title: "Cis fraction"
-        description: "Cis valid pairs / all valid pairs"
-        min: 0
-        max: 1
-        scale: "RdYlGn"
-      n_loops:
-        title: "Significant loops"
-        description: "FitHiChIP loops at configured FDR"
-        format: "{:,.0f}"
-        scale: "Blues"
-      apa_score:
-        title: "APA score"
-        description: "Aggregate Peak Analysis score (≥1.5 = PASS)"
-        min: 0
-        scale: "RdYlGn"
-      hicrep_mean_scc:
-        title: "HiCRep SCC"
-        description: "Stratum-adjusted Pearson correlation between replicates (≥0.85 = PASS)"
-        min: 0
-        max: 1
-        scale: "RdYlGn"
-      overall_status:
-        title: "Overall"
-        description: "PASS / FAIL / PASS_WITH_NOT_ASSESSED"
-
-  apa_scores:
-    id: "apa_scores"
-    section_name: "APA Scores"
-    description: >
-      Aggregate Peak Analysis: contact enrichment at loop centres vs
-      random-shift controls.  Score ≥ 1.5 is the QC pass threshold.
-    plot_type: "bargraph"
-    pconfig:
-      id: "apa_bar"
-      title: "APA score per sample"
-      ylab: "APA score"
-      cpswitch: false
-
-# ── File search patterns ──────────────────────────────────────────────────────
-sp:
-  loop_qc:
-    fn: "*.json"
-    contents: "overall_status"
-    num_lines: 5
-  apa_scores:
-    fn: "*.apa.json"
-    contents: "apa_score"
-    num_lines: 5
+# Custom sections are emitted as self-contained *_mqc.json files. Keeping their
+# schema in the versioned generator prevents this config from drifting away from
+# field names or QC thresholds.
+custom_content:
+  order:
+    - balance_qc
+    - loop_qc
+    - apa_scores
 
 # ── Module order ─────────────────────────────────────────────────────────────
 module_order:
   - fastqc
   - fastp
-  - custom_content  # loop_qc + apa_scores JSON files
+  - custom_content  # balance_qc + loop_qc + apa_scores JSON files
   - general_stats
 
 # ── General settings ─────────────────────────────────────────────────────────
 max_table_rows: 500
 plots_force_interactive: false
-export_plots: true
+# The workflow publishes the self-contained HTML. Static plot export requires a
+# separate Kaleido executable that MultiQC 1.25 does not ship in its environment.
+export_plots: false
