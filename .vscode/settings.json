@@ -1,6 +1,5 @@
 {
-  "python.defaultInterpreterPath": "${env:CONDA_PREFIX}/envs/oracle-hichip/bin/python",
-  "python.terminal.activateEnvironment": true,
+  "python.terminal.activateEnvironment": false,
   "python.analysis.typeCheckingMode": "basic",
   "python.analysis.autoImportCompletions": true,
   "python.analysis.diagnosticMode": "workspace",
@@ -14,7 +13,6 @@
   "ruff.lint.args": ["--line-length=100"],
 
   "snakefmt.args": ["--line-length=100"],
-  "snakemake-language-server.snakemake-language-server.executable": "snakemake",
   "files.associations": {
     "*.smk": "snakemake",
     "Snakefile": "snakemake",

@@ -8,7 +8,8 @@ rule annotate_loops:
     input:
         loops = RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed",
         peaks = RESULTS / "peaks/{sample}_peaks.bed",
-        gtf   = GENOME["gtf"]
+        gtf   = GENOME["gtf"],
+        shared_code = SHARED_SCRIPT_DEPS,
     output:
         bedpe = RESULTS / "oracle_cos/intermediates/{sample}.annotated_loops.bedpe"
     threads: 2
@@ -21,7 +22,7 @@ rule annotate_loops:
 
 rule export_oracle_cos:
     """
-    Produce the canonical ORACLE input for a sample:
+    Produce the versioned ORACLE HiChIP prototype export for a sample:
         - .pt    PyTorch Geometric HeteroData with node + edge attributes
         - .h5    HDF5 mirror for ablation/debugging
         - manifest JSON describing channels and limitations
@@ -32,19 +33,24 @@ rule export_oracle_cos:
         peaks = RESULTS / "peaks/{sample}_peaks.bed",
         insul = RESULTS / "qc/insulation/{sample}.insulation.tsv",
         eigs  = RESULTS / "qc/compartments/{sample}.cis.eigs.tsv",
-        loop_qc = RESULTS / "qc/loop_qc/{sample}.json"
+        eigs_status = RESULTS / "qc/compartments/{sample}.cis.eigs.status.json",
+        balance = RESULTS / "qc/balance/{sample}.balance.json",
+        loop_qc = RESULTS / "qc/loop_qc/{sample}.json",
+        chromsizes = GENOME["chromsizes"],
+        blacklist = GENOME.get("blacklist", ""),
+        microbiome = [ORACLE_MICROBIOME_TSV] if ORACLE_MICROBIOME_TSV else [],
+        shared_code = SHARED_SCRIPT_DEPS,
     output:
         pt = RESULTS / "oracle_cos/{sample}.pt",
         h5 = RESULTS / "oracle_cos/{sample}.h5",
         manifest = RESULTS / "oracle_cos/{sample}.manifest.json"
     params:
         bin_sizes_bp = ORACLE_BIN_SIZES_BP,
-        chromsizes = GENOME["chromsizes"],
-        # Per-assembly blacklist from genome.yaml (single source of truth).
-        blacklist = GENOME.get("blacklist", ""),
-        microbiome_tsv = config["oracle_export"].get("microbiome_metadata_tsv", ""),
         drop_chroms = config["oracle_export"]["drop_chromosomes"],
-        emit_bigwigs = config["oracle_export"]["emit_bigwigs"]
+        primary_chromosomes_only = config["oracle_export"].get("primary_chromosomes_only", True),
+        assembly = ASSEMBLY,
+        mark = lambda wc: SAMPLES.loc[wc.sample, "mark"],
+        cell_type = lambda wc: SAMPLES.loc[wc.sample, "cell_type"],
     threads: 8
     conda: "../envs/oracle_export.yaml"
     log:

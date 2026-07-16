@@ -5,5 +5,6 @@ channels:
   - nodefaults
 dependencies:
   - python=3.11
+  - git=2.45.*
   - pandas=2.2.*
   - numpy=1.26.*

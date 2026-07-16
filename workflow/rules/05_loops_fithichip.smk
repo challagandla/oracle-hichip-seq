@@ -10,6 +10,7 @@
 
 
 FITHICHIP_VERSION = "11.0"
+FITHICHIP_SHA256 = "0ab11a130ad6b070f82ce7dff330f877c4b0156f9fe90b6e582e462339380e6c"
 FITHICHIP_DIR = RESULTS / f"tools/FitHiChIP-{FITHICHIP_VERSION}"
 
 
@@ -22,8 +23,12 @@ rule fithichip_install:
     """
     output:
         script = FITHICHIP_DIR / "FitHiChIP_HiCPro.sh",
+        manifest = FITHICHIP_DIR / ".oracle-install.sha256",
     params:
         url = f"https://github.com/ay-lab/FitHiChIP/archive/refs/tags/{FITHICHIP_VERSION}.tar.gz",
+        sha256 = FITHICHIP_SHA256,
+        version = FITHICHIP_VERSION,
+        cache = f".cache/downloads/FitHiChIP-{FITHICHIP_VERSION}.tar.gz",
         dest = lambda wc, output: str(Path(output.script).parent),
     conda: "../envs/fithichip.yaml"
     log:
@@ -31,31 +36,31 @@ rule fithichip_install:
     shell:
         r"""
         set -euo pipefail
-        mkdir -p {params.dest} $(dirname {log})
-        curl -L --fail --retry 3 "{params.url}" -o {params.dest}/src.tar.gz > {log} 2>&1
-        tar -xzf {params.dest}/src.tar.gz -C {params.dest} --strip-components=1 >> {log} 2>&1
-        rm -f {params.dest}/src.tar.gz
-        chmod +x {output.script}
+        mkdir -p $(dirname {params.dest}) $(dirname {log})
+        tmp=$(mktemp -d "$(dirname {params.dest})/.FitHiChIP-{params.version}.XXXXXX")
+        trap 'rm -rf "$tmp"' EXIT
+        if [ -s {params.cache} ]; then
+            cp {params.cache} "$tmp/src.tar.gz"
+        else
+            curl -L --fail --retry 3 "{params.url}" -o "$tmp/src.tar.gz" > {log} 2>&1
+        fi
+        echo "{params.sha256}  $tmp/src.tar.gz" | sha256sum -c - >> {log} 2>&1
+        mkdir "$tmp/source"
+        tar -xzf "$tmp/src.tar.gz" -C "$tmp/source" --strip-components=1 >> {log} 2>&1
+        test -s "$tmp/source/FitHiChIP_HiCPro.sh"
+        (cd "$tmp/source" && \
+            find FitHiChIP_HiCPro.sh src Analysis Imp_Scripts -type f -print0 | \
+            sort -z | xargs -0 sha256sum > .oracle-install.sha256)
+        chmod +x "$tmp/source/FitHiChIP_HiCPro.sh"
+        rm -rf {params.dest}
+        mv "$tmp/source" {params.dest}
         test -s {output.script}
+        test -s {output.manifest}
         echo "FitHiChIP installed to {params.dest}" >> {log}
         """
 
-# The `ValidPairs=` input path is a dead end and is deliberately not used.
-#
-# FitHiChIP 11.0 only accepts validPairs if it can build the contact matrix and bin
-# interval files from them, and it does that by shelling out to HiC-Pro:
-#
-#   if [[ -z $InpCoolFile && -z $InpHiCFile && -z $InpInitialInteractionBedFile ]]; then
-#       if [[ -z $InpBinIntervalFile || -z $InpMatrixFile ]]; then
-#           HiCProExec=`which HiC-Pro`
-#           if [[ -z $HiCProExec ]]; then
-#               echo 'ERROR ===>>>> HiC-pro is not installed ... FitHiChIP quits !!!'
-#
-# HiC-Pro is not installed, is not on bioconda, and is the legacy stack this
-# pipeline exists to avoid. Feeding FitHiChIP validPairs therefore made it quit
-# before calling a single loop, for every sample.
-#
-# We already build the matrix with cooler, so it is handed over directly:
+# FitHiChIP's ValidPairs path requires a HiC-Pro installation to build its matrix.
+# This workflow instead hands over the matrix already built with cooler:
 # `COOL=` takes the 5 kb single-resolution `{sample}.base.cool`, and FitHiChIP reads
 # it with `cooler dump -t pixels --join`. It must be the plain .cool file, not an
 # `.mcool::/resolutions/5000` URI -- FitHiChIP validates the path with `[ ! -f ... ]`,
@@ -65,11 +70,11 @@ rule fithichip_install:
 rule fithichip_config:
     """
     Build a per-sample FitHiChIP config text file. FitHiChIP uses historical
-    numeric codes, so those are explicit in config.yaml and written here.
+    numeric codes; the workflow derives them from the readable analysis choices.
     """
     input:
         cool = RESULTS / "cool/{sample}.base.cool",
-        peaks = RESULTS / "peaks/{sample}_peaks.bed",
+        peaks = lambda wc: RESULTS / f"peaks/consensus/{SAMPLES.loc[wc.sample, 'anchor_group']}.consensus.bed",
         chromsizes = GENOME["chromsizes"]
     output:
         cfg = RESULTS / "loops/{sample}/fithichip.config"
@@ -78,8 +83,9 @@ rule fithichip_config:
         lower = config["fithichip"]["lower_distance"],
         upper = config["fithichip"]["upper_distance"],
         fdr   = config["fithichip"]["fdr_threshold"],
-        int_code = config["fithichip"]["int_type_code"],
-        bias_code = config["fithichip"]["bias_type_code"],
+        int_code = FITHICHIP_INT_CODE,
+        bias_code = FITHICHIP_BIAS_CODE,
+        merge_int = 1 if FITHICHIP_MERGE else 0,
         use_p2p = config["fithichip"].get("use_p2p_background", 1),
         itype = config["fithichip"].get("interaction_type", "Peak-to-ALL"),
         bgtype = config["fithichip"].get("background_type", "Coverage_Bias"),
@@ -87,25 +93,15 @@ rule fithichip_config:
     run:
         outdir = Path(params.outdir).resolve()
         outdir.mkdir(parents=True, exist_ok=True)
-        # Key set follows FitHiChIP 11.0's own configfile. The previous template
-        # carried Draw / TimeProf / HiCProBasedir, which 11.0 does not read, and
-        # omitted MergeInt, which it does: with MergeInt unset, adjacent
-        # significant bins are reported as separate loops instead of being merged
-        # into one contact, which inflates the loop count and double-counts the
-        # same interaction in the differential test downstream.
-        #
-        # EVERY path is resolved to an absolute one. FitHiChIP chdir's into its own
-        # release directory before invoking its R and python steps, so a relative
-        # path in the config is resolved against the wrong root and the file simply
-        # is not there. It absolutises COOL itself but not ChrSizeFile / PeakFile /
-        # OutDir, so with Snakemake's relative inputs it read no peaks and no
-        # chromosome sizes, and exited before writing anything.
+        # This key set follows the FitHiChIP 11.0 config contract. MergeInt ensures
+        # adjacent significant bins are represented as one merged contact.
+        # Resolve every path because FitHiChIP changes into its release directory
+        # before running its R and Python stages.
         text = f"""
 # Auto-generated FitHiChIP config for sample {wildcards.sample}
 # interaction_type={params.itype}; background_type={params.bgtype}
 #
-# COOL, not ValidPairs: the validPairs path makes FitHiChIP shell out to HiC-Pro to
-# build the matrix, and quit when it is absent. cooler already built it.
+# COOL is supplied because the matrix has already been built by cooler.
 ValidPairs=
 Interval=
 Matrix=
@@ -122,7 +118,7 @@ LowDistThr={params.lower}
 UppDistThr={params.upper}
 UseP2PBackgrnd={params.use_p2p}
 BiasType={params.bias_code}
-MergeInt=1
+MergeInt={params.merge_int}
 QVALUE={params.fdr}
 PREFIX={wildcards.sample}
 OverWrite=1
@@ -131,14 +127,24 @@ OverWrite=1
 
 rule fithichip_run:
     """
-    Run FitHiChIP. Produces the canonical interactions BED at the configured
-    FDR threshold.
+    Run FitHiChIP, retain its unmerged all-interaction table, and publish the
+    separately filtered q-thresholded call set used for reporting and APA.
     """
     input:
         cfg = RESULTS / "loops/{sample}/fithichip.config",
         script = FITHICHIP_DIR / "FitHiChIP_HiCPro.sh",
+        install_manifest = FITHICHIP_DIR / ".oracle-install.sha256",
+        blacklist = GENOME["blacklist"],
+        filter_script = "workflow/scripts/filter_fithichip_loops.py",
+        consensus_code = "workflow/scripts/build_consensus_loops.py",
+        shared_code = SHARED_SCRIPT_DEPS,
     output:
-        loops = RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed"
+        raw_all = RESULTS / (
+            f"loops/{{sample}}/{FITHICHIP_ALL_RESULT_DIR}/"
+            "{sample}.interactions_FitHiC.bed"
+        ),
+        loops = RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed",
+        audit = RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.filtering.tsv",
     threads: config["threads"]["fithichip"]
     conda: "../envs/fithichip.yaml"
     log:
@@ -149,47 +155,49 @@ rule fithichip_run:
         # derived from the same config values written into the .config so the path we
         # read cannot drift from the run we asked for.
         result_dir = FITHICHIP_RESULT_DIR,
+        all_result_dir = FITHICHIP_ALL_RESULT_DIR,
         # Formatted here, not left as a literal: Snakemake does not expand wildcards
         # inside a params string.
         result_file = lambda wc: FITHICHIP_RESULT_FILE.format(sample=wc.sample),
+        min_reads = int(config["fithichip"].get("min_reads", 0)),
+        q_threshold = float(config["fithichip"]["fdr_threshold"]),
         want_desc = (
-            "Merged call set: adjacent significant bin pairs collapsed into one "
-            "contact (fithichip.merge_nearby)."
+            "FitHiChIP MergeNearContacts call set: nearby significant bins are "
+            "grouped, but the format can retain multiple representative rows per "
+            "connected neighbourhood (fithichip.merge_nearby)."
             if FITHICHIP_MERGE else
             "Raw call set: one physical loop may appear as several adjacent bin pairs."
         ),
     shell:
         r"""
-        # Isolate the conda R from the host installation. ~/.Rprofile here runs
-        # .libPaths("~/Rlibs"), which PREPENDS a library built against a different
-        # R to the search path, and FitHiChIP's R steps (edgeR, ggplot2,
-        # data.table, dplyr) then fail to load packages that are in fact installed
-        # in this environment. Verified: without this, requireNamespace() is FALSE
-        # for all four inside the env that contains them. The profile is sourced on
-        # every R startup, so clearing R_LIBS_USER alone does not help.
+        # Isolate rule packages from user-level R and Python startup configuration.
         export R_PROFILE_USER=/dev/null
         export R_ENVIRON_USER=/dev/null
         export R_LIBS_USER=""
         export R_LIBS_SITE=""
 
-        # Same hazard on the Python side: FitHiChIP runs python scripts, and
-        # ~/.local/lib/python*/site-packages is searched ahead of the environment.
-        # A stale numpy there is what broke the sibling ChIP-seq pipeline.
         export PYTHONNOUSERSITE=1
 
-        # FitHiChIP is not a conda package, so there is no binary to look for on
-        # PATH — it is the release fetched by fithichip_install. The previous
-        # version of this rule probed for a `fithichip` executable and, failing
-        # that, told the user to `mamba install -c bioconda fithichip`, which does
-        # not exist on any channel.
-        # `> {log} 2>&1`, not `2> {log}`: FitHiChIP reports its fatal errors on
-        # STDOUT, not stderr -- including the one that matters here,
-        #   'ERROR ===>>> ... file does not exist'
-        # so redirecting only stderr left an EMPTY log behind every failure and the
-        # rule could only report that no BED appeared, never why.
-        bash {input.script} -C {input.cfg} > {log} 2>&1
+        # Detect a partially deleted or modified FitHiChIP installation before a
+        # long R job starts. The pinned archive hash protects installation; this
+        # manifest protects the extracted scripts used at execution time.
+        (cd $(dirname {input.script}) && sha256sum -c .oracle-install.sha256) \
+            >> {log} 2>&1
+
+        # FitHiChIP reports some fatal errors on stdout, so capture both streams.
+        bash {input.script} -C {input.cfg} >> {log} 2>&1
 
         outdir="$(dirname {output.loops})"
+
+        # FitHiChIP's official differential contract is the unmerged, unthresholded
+        # PREFIX.interactions_FitHiC.bed in FitHiC_BiasCorr. This is intentionally
+        # distinct from the q-filtered MergeNearContacts reporting call set below.
+        raw_all="$outdir/{params.all_result_dir}/{wildcards.sample}.interactions_FitHiC.bed"
+        if [ ! -s "$raw_all" ]; then
+            echo "ERROR: FitHiChIP produced no unmerged all-interaction table at" >&2
+            echo "       $raw_all" >&2
+            exit 1
+        fi
 
         # Take the call set from the directory the configured interaction type and
         # background actually write to. A `find -name "*interactions_FitHiC_*.bed"`
@@ -202,15 +210,53 @@ rule fithichip_run:
         # {params.want_desc}
         want="$outdir/{params.result_dir}/{params.result_file}"
         if [ -s "$want" ]; then
-            cp "$want" {output.loops}
+            python {input.filter_script} \
+                --input "$want" \
+                --blacklist {input.blacklist} \
+                --min-reads {params.min_reads} \
+                --q-threshold {params.q_threshold} \
+                --output {output.loops} \
+                --audit {output.audit}
         else
             echo "ERROR: FitHiChIP produced no BED at q={params.q_label} at" >&2
             echo "       $want" >&2
             echo "       (present: $(find "$outdir" -name '*interactions_FitHiC_*.bed' 2>/dev/null | tr '\n' ' '))" >&2
             exit 1
         fi
+        test -s {output.raw_all}
         test -s {output.loops}
         """
+
+
+rule normalize_fithichip_all_interactions:
+    """Stream and normalize every unmerged FitHiChIP interaction without q filtering."""
+    input:
+        raw = RESULTS / (
+            f"loops/{{sample}}/{FITHICHIP_ALL_RESULT_DIR}/"
+            "{sample}.interactions_FitHiC.bed"
+        ),
+        blacklist = GENOME["blacklist"],
+        chromsizes = GENOME["chromsizes"],
+        shared_code = SHARED_SCRIPT_DEPS,
+    output:
+        all_interactions = RESULTS / "loops/{sample}/{sample}.interactions_FitHiC.all.tsv.gz",
+        eligible = RESULTS / "loops/{sample}/{sample}.interactions_FitHiC.eligible.tsv.gz",
+        audit = RESULTS / "loops/{sample}/{sample}.interactions_FitHiC.all.audit.json",
+    params:
+        bin_size = int(config["fithichip"]["bin_size"]),
+        lower_distance = int(config["fithichip"]["lower_distance"]),
+        upper_distance = int(config["fithichip"]["upper_distance"]),
+        min_count = int(config["differential"]["min_count"]),
+        interaction_type = config["fithichip"]["interaction_type"],
+        source_relative = lambda wc: (
+            f"{FITHICHIP_ALL_RESULT_DIR}/{wc.sample}.interactions_FitHiC.bed"
+        ),
+    threads: 1
+    conda: "../envs/pandas.yaml"
+    log:
+        RESULTS / "logs/fithichip/{sample}.normalize_all.log",
+    script:
+        "../scripts/normalize_fithichip_all.py"
 
 rule mustache_crosscheck:
     """
@@ -218,16 +264,22 @@ rule mustache_crosscheck:
     Used for sanity; not the primary call set.
     """
     input:
-        mcool = RESULTS / "cool/{sample}.mcool"
+        mcool = RESULTS / "cool/{sample}.mcool",
+        balance = RESULTS / "qc/balance/{sample}.balance.json",
+        primary = RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed",
+        runtime_code = "workflow/scripts/mustache_runtime.py",
+        shared_code = SHARED_SCRIPT_DEPS,
     output:
-        tsv = RESULTS / "loops/{sample}/{sample}.mustache.tsv"
+        tsv = RESULTS / "loops/{sample}/{sample}.mustache.tsv",
+        status = RESULTS / "loops/{sample}/{sample}.mustache.status.json",
     params:
-        res = config["fithichip"]["bin_size"]
+        res = config.get("mustache", {}).get("resolution", 10000),
+        comparison_tolerance_bins = config.get("mustache", {}).get(
+            "comparison_tolerance_bins", 1
+        ),
     threads: 8
     conda: "../envs/mustache.yaml"
     log:
         RESULTS / "logs/mustache/{sample}.log"
-    shell:
-        r"""
-        mustache -f {input.mcool} -r {params.res} -p {threads} -o {output.tsv} 2> {log}
-        """
+    script:
+        "../scripts/mustache_balance_aware.py"

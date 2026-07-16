@@ -6,13 +6,15 @@ authors:
   - given-names: Anil
     family-names: Challagandla
     email: challagandla.anil@gmail.com
-repository-code: ""
+repository-code: "https://github.com/challagandla/oracle-hichip-seq"
 abstract: >-
   End-to-end Snakemake workflow for HiChIP processing — bwa-mem2 + pairtools
-  alignment, cooler/cooltools matrix building and balancing, MACS2 1D peak
-  calling, FitHiChIP loop calling, HiCRep + APA + insulation QC, differential
-  loop analysis (pyDESeq2), pyGenomeTracks visualisation, and export to the
-  ORACLE Chromatin Operating System graph format (PyTorch Geometric).
+  alignment, cooler/cooltools matrix building and balancing, MACS3 anchor
+  calling, FitHiChIP loop calling, HiCRep + held-out APA + insulation QC,
+  pilot-aware donor-blocked differential contact analysis from unthresholded
+  FitHiChIP hypotheses (pyDESeq2), pyGenomeTracks
+  visualisation, and export to the ORACLE Chromatin Operating System graph
+  format (PyTorch Geometric and HDF5).
 keywords:
   - HiChIP
   - Snakemake
@@ -23,5 +25,5 @@ keywords:
   - epigenomics
   - bioinformatics
 license: MIT
-version: 0.1.0
-date-released: 2026-05-29
+version: 0.2.0
+date-released: 2026-07-16

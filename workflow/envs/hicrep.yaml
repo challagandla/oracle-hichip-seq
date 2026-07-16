@@ -14,4 +14,4 @@ dependencies:
   - scipy=1.13.*
   - pip
   - pip:
-      - hicrep
+      - hicrep==0.2.6

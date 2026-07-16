@@ -26,4 +26,4 @@ dependencies:
       # Unpinned, pip resolved anndata 0.12.19 against pyDESeq2 0.4.12 and every
       # differential contrast failed. Nothing in pyDESeq2's own metadata prevents it.
       - anndata==0.10.9
-      - pyDESeq2==0.4.*
+      - pyDESeq2==0.4.12

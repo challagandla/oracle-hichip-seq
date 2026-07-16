@@ -1,53 +1,43 @@
-# Snakemake SLURM profile
-# Usage: snakemake -s workflow/Snakefile --profile profiles/slurm --configfile config/config.yaml
-#
-# Adjust partition names, memory limits, and account to match your cluster.
+# Snakemake's maintained SLURM executor profile.
+# Adjust partition/account names to match the local cluster before use.
 
-executor: cluster-generic
-cluster-generic-submit-cmd: >
-  sbatch
-  --partition={resources.partition}
-  --cpus-per-task={threads}
-  --mem={resources.mem_mb}M
-  --time={resources.walltime}
-  --job-name=hichip_{rule}_{wildcards}
-  --output=logs/slurm/{rule}_{wildcards}_%j.out
-  --error=logs/slurm/{rule}_{wildcards}_%j.err
-
-cluster-generic-cancel-cmd: scancel
-cluster-generic-status-cmd: squeue --job {jobid} --noheader --format "%T"
-
-# Default resources — individual rules can override via resources:
-default-resources:
-  - mem_mb=8000
-  - threads=4
-  - walltime="04:00:00"
-  - partition="compute"
-
-# Per-rule resource overrides
-set-resources:
-  bwa_align_sort_pairs:
-    mem_mb: 64000
-    threads: 24
-    walltime: "08:00:00"
-    partition: "highmem"
-  pairtools_dedup:
-    mem_mb: 32000
-    walltime: "04:00:00"
-  cooler_zoomify:
-    mem_mb: 32000
-    walltime: "04:00:00"
-  fithichip_run:
-    mem_mb: 32000
-    threads: 16
-    walltime: "12:00:00"
-  export_oracle_cos:
-    mem_mb: 48000
-    threads: 8
-    walltime: "04:00:00"
-
+executor: slurm
 jobs: 200
 latency-wait: 120
 rerun-incomplete: true
 keep-going: false
 printshellcmds: true
+slurm-status-command: sacct
+slurm-efficiency-report: true
+
+default-resources:
+  - mem_mb=8000
+  - runtime=240
+  - slurm_partition="compute"
+
+set-resources:
+  bwa_align_sort_pairs:
+    mem_mb: 64000
+    runtime: 480
+    slurm_partition: "highmem"
+  pairtools_dedup:
+    mem_mb: 32000
+    runtime: 240
+  cooler_zoomify:
+    mem_mb: 32000
+    runtime: 240
+  fithichip_run:
+    mem_mb: 32000
+    runtime: 720
+  hicrep_replicate_qc:
+    mem_mb: 32000
+    runtime: 360
+  stripenn_call:
+    mem_mb: 48000
+    runtime: 480
+  differential_loops:
+    mem_mb: 32000
+    runtime: 360
+  export_oracle_cos:
+    mem_mb: 48000
+    runtime: 240

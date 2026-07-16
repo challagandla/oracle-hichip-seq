@@ -5,12 +5,7 @@ cooler at the FitHiChIP bin size.
 Each loop is counted over the full rectangle of bins its two anchors span, not over
 the single bin containing `start`.
 
-On FitHiChIP 11.0 those are the same thing. Checked against a real call set: every
-anchor is exactly one bin wide, including in the merged output -- the merge step
-picks a representative bin pair rather than widening the anchor. An earlier version
-of this comment claimed anchors were "routinely 2-4 bins across"; that was wrong,
-and the 22% figure that went with it came from synthetic anchors, not from anything
-FitHiChIP emits.
+FitHiChIP 11.0 normally emits one-bin anchors, including in its merged output.
 
 The rectangle is kept anyway, because the union BEDPE is not required to come from
 FitHiChIP. Any caller that emits a wider anchor -- mustache, a lifted-over published
@@ -19,8 +14,8 @@ arbitrary fraction of its own footprint, and that fraction scales with anchor wi
 which scales with ChIP enrichment, which is what differs between the groups being
 compared. That is a group-correlated bias rather than noise, and it is silent.
 
-The load-bearing part is the counting method: one streaming pass over the pixel
-table instead of a cooler .fetch() per loop. A union set is O(10^5) loops and each
+Counting uses one streaming pass over the pixel table instead of a cooler .fetch()
+per loop. A union set is O(10^5) loops and each
 .fetch() is an indexed HDF5 range read, so per-loop fetching costs hours per sample;
 the pixel table is read linearly once.
 """
@@ -53,13 +48,27 @@ def _anchor_bins(clr: cooler.Cooler, chrom: str, start, end, res: int) -> np.nda
     return offset + np.arange(lo, hi, dtype=np.int64)
 
 
-def count_loops(clr: cooler.Cooler, loops: pd.DataFrame, res: int) -> np.ndarray:
-    """Pairs supporting each loop, summed over the full rectangle its anchors span."""
+def count_loops(
+    clr: cooler.Cooler,
+    loops: pd.DataFrame,
+    res: int,
+    lower_distance: int,
+    upper_distance: int,
+) -> np.ndarray:
+    """Count supporting pairs inside each footprint and the caller distance range.
+
+    Tolerance-expanded anchors can straddle FitHiChIP's lower or upper distance
+    boundary.  Pixels outside that exact search range were never eligible for the
+    caller's background model and must not enter the differential count matrix.
+    """
+    if not (0 <= int(lower_distance) < int(upper_distance)):
+        raise ValueError("distance bounds must satisfy 0 <= lower < upper")
     if loops.empty:
         return np.zeros(0, dtype=np.int64)
 
     n_bins = int(clr.info["nbins"])
     known = set(clr.chromnames)
+    bin_starts = clr.bins()[:]["start"].to_numpy(dtype=np.int64)
 
     # Expand every loop into the pixels its two anchors span. cooler stores the
     # upper triangle only, so each pair is emitted with bin1 <= bin2.
@@ -76,6 +85,15 @@ def count_loops(clr: cooler.Cooler, loops: pd.DataFrame, res: int) -> np.ndarray
         g1, g2 = np.meshgrid(b1, b2, indexing="ij")
         lo = np.minimum(g1, g2).ravel()
         hi = np.maximum(g1, g2).ravel()
+        distance = np.abs(bin_starts[hi] - bin_starts[lo])
+        eligible = (
+            (distance >= int(lower_distance))
+            & (distance <= int(upper_distance))
+        )
+        lo = lo[eligible]
+        hi = hi[eligible]
+        if lo.size == 0:
+            continue
         keys = np.unique(lo * n_bins + hi)  # unique: a self-overlapping anchor pair
         pair_keys.append(keys)              # must not count the same pixel twice
         pair_loop.append(np.full(keys.size, i, dtype=np.int64))
@@ -130,7 +148,13 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         log.warning("union BEDPE is empty; wrote an empty count table")
         return
 
-    counts = count_loops(clr, loops, res)
+    counts = count_loops(
+        clr,
+        loops,
+        res,
+        int(snakemake.params.lower_distance),
+        int(snakemake.params.upper_distance),
+    )
 
     out["count"] = counts
     out["sample"] = snakemake.wildcards.sample

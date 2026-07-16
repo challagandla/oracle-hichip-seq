@@ -14,7 +14,7 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     out = Path(snakemake.output.bw)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    sizes = read_chromsizes(snakemake.params.chromsizes)
+    sizes = read_chromsizes(snakemake.input.chromsizes)
     df = pd.read_csv(snakemake.input.eigs, sep="\t")
     if "E1" not in df.columns:
         raise ValueError(f"{snakemake.input.eigs} does not contain an E1 column")

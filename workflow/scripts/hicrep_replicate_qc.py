@@ -1,8 +1,10 @@
 """
 Stratum-adjusted Pearson correlation (HiCRep) between biological replicates.
 
-Outputs a three-state QC result: PASS, FAIL, or NOT_ASSESSED. Single-replicate
-samples are not treated as true passes.
+Outputs a four-state QC result: PASS, FAIL, DISCORDANT, or NOT_ASSESSED.
+Single-replicate samples are not treated as true passes. For groups with more
+than two replicates, a favourable best match cannot hide a weak pair: every
+depth-qualified pair must clear the threshold for PASS.
 
 hicrepSCC returns a numpy array indexed by chromosome, pre-filled with the
 sentinel -2.0 (`scc = np.full(len(chrNames), -2.0)`), not a dict and not NaN. So
@@ -11,14 +13,13 @@ drags SCC toward -2. Chromosomes are excluded via the function's own excludeChr
 argument rather than by matching substrings of the returned keys.
 """
 import logging
+import hashlib
 import sys
 from itertools import combinations
 from pathlib import Path
 
 import cooler
 import numpy as np
-from hicrep import hicrepSCC
-from hicrep.utils import readMcool
 
 sys.path.insert(0, str(Path(__file__).parent))
 from utils import setup_logging, write_json  # noqa: E402
@@ -40,8 +41,9 @@ def _scc_chroms(view_path: str, clr_chroms: set[str]) -> list[str]:
     is also the correct thing statistically: SCC is a stratum-adjusted correlation
     over a distance-decay profile, which a 60 kb contig does not have.
 
-    chrX is dropped even though it is in the view: donor sex is not recorded in this
-    cohort, so X copy number varies between the libraries being correlated.
+    chrX is dropped even though it is in the view. An autosomal SCC contract avoids
+    sex-chromosome ploidy and mappability effects, remains comparable when users
+    replace the bundled male cohort, and matches the depth denominator exactly.
     """
     keep = []
     for line in Path(view_path).read_text().splitlines():
@@ -53,25 +55,76 @@ def _scc_chroms(view_path: str, clr_chroms: set[str]) -> list[str]:
     return keep
 
 
-def _cis_contacts(path: str, bin_sz: int) -> int:
-    """Total contacts in the matrix HiCRep will actually read."""
-    return int(cooler.Cooler(f"{path}::resolutions/{bin_sz}").info["sum"])
+def _selected_cis_contacts(
+    clr: cooler.Cooler, chromosomes: list[str], max_dist: int
+) -> int:
+    """Contacts in the exact diagonal/chromosome population scored by HiCRep.
+
+    hicrepSCC removes the main diagonal and diagonals beyond ``dBPMax`` before
+    stochastic depth matching. Counting all cis pixels would let long-range or
+    diagonal contacts clear a depth floor even though they never enter SCC.
+    """
+    pixels = clr.matrix(balance=False, as_pixels=True, join=False)
+    max_bin_offset = int(max_dist) // int(clr.binsize)
+    total = 0
+    for chrom in chromosomes:
+        table = pixels.fetch(chrom)
+        offsets = table["bin2_id"].to_numpy() - table["bin1_id"].to_numpy()
+        keep = (offsets > 0) & (offsets <= max_bin_offset)
+        total += int(table.loc[keep, "count"].sum())
+    return total
+
+
+def _cis_contacts(
+    path: str, bin_sz: int, chromosomes: list[str], max_dist: int
+) -> int:
+    clr = cooler.Cooler(f"{path}::resolutions/{bin_sz}")
+    return _selected_cis_contacts(clr, chromosomes, max_dist)
+
+
+def _pair_seed(a: str, b: str, bin_sz: int, max_dist: int, h: int) -> int:
+    """Stable NumPy seed for HiCRep's stochastic depth matching."""
+    identity = "|".join([*sorted((Path(a).stem, Path(b).stem)), str(bin_sz), str(max_dist), str(h)])
+    return int(hashlib.sha256(identity.encode()).hexdigest()[:8], 16)
+
+
+def _classify_sccs(
+    values: list[float], threshold: float
+) -> tuple[str, bool | None]:
+    """Classify a set of depth-qualified replicate comparisons.
+
+    ``best_scc`` is intentionally not used here. Taking the maximum is a
+    replicate-count-dependent selection statistic: one strong sibling match can
+    conceal another discordant pair. Mixed evidence is therefore explicit rather
+    than forced into either PASS or FAIL.
+    """
+    if not values:
+        return "NOT_ASSESSED", None
+    passes = [value >= threshold for value in values]
+    if all(passes):
+        return "PASS", True
+    if not any(passes):
+        return "FAIL", False
+    return "DISCORDANT", None
 
 
 def main(snakemake) -> None:  # type: ignore[no-untyped-def]
     setup_logging(snakemake.log[0])
+    from hicrep import hicrepSCC
+    from hicrep.utils import readMcool
     mcools = list(snakemake.input.mcools)
     bin_sz = int(snakemake.params.bin)
     max_dist = int(snakemake.params.maxd)
     h = int(snakemake.params.h)
-    threshold = float(snakemake.config["hicrep"]["threshold_pass"])
-    min_contacts = int(snakemake.config["hicrep"]["min_contacts_for_scc"])
-
-    depth = {p: _cis_contacts(p, bin_sz) for p in mcools}
+    threshold = float(snakemake.params.threshold)
+    min_contacts = int(snakemake.params.min_contacts)
 
     clr_chroms = set(cooler.Cooler(f"{mcools[0]}::resolutions/{bin_sz}").chromnames)
     scc_chroms = _scc_chroms(snakemake.input.view, clr_chroms)
     log.info("scoring SCC over %d chromosomes", len(scc_chroms))
+    depth = {
+        p: _cis_contacts(p, bin_sz, scc_chroms, max_dist) for p in mcools
+    }
 
     this_sample = snakemake.wildcards.sample
 
@@ -82,10 +135,21 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         "h": h,
         "n_replicates": len(mcools),
         "contacts": {Path(p).stem: depth[p] for p in mcools},
+        "contact_depth_population": (
+            "stored off-diagonal cis contacts on HiCRep-scored autosomes at "
+            f"1..{max_dist // bin_sz} bins (<= {max_dist} bp), exactly matching "
+            "the population retained before hicrepSCC depth matching"
+        ),
         "min_contacts_for_scc": min_contacts,
         "pairwise_scc": [],
         "mean_scc": None,
+        "min_scc": None,
         "best_scc": None,
+        "n_qualified_pairs": 0,
+        "group_median_scc": None,
+        "group_n_qualified_pairs": 0,
+        "group_status": "NOT_ASSESSED",
+        "group_pass": None,
         "threshold": threshold,
         "status": "NOT_ASSESSED",
         "pass": None,
@@ -97,22 +161,20 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
         return
 
     sccs = []
+    group_sccs = []
     for a, b in combinations(mcools, 2):
-        # SCC is dominated by the shallower library, because bDownSample crushes the
-        # deeper matrix to the shallower one's contact count. Measured on this
-        # cohort at 25 kb: two libraries from DIFFERENT cell types (90.8M and 47.6M
-        # contacts) score 0.743, while two genuine replicates score 0.221 when one
-        # of them holds 3.0M. Below the floor the number reports depth, not
-        # concordance, so it is recorded but never allowed to decide PASS/FAIL.
+        # SCC is depth-sensitive because bDownSample reduces the deeper library to
+        # the shallower contact count. Below the configured floor, report the value
+        # as depth-confounded rather than using it for PASS/FAIL.
         shallow = min(depth[a], depth[b])
         confounded = shallow < min_contacts
 
         cool_a, _ = readMcool(a, bin_sz)
         cool_b, _ = readMcool(b, bin_sz)
         # bDownSample=True: HiCRep's SCC is sensitive to sequencing depth, and
-        # these libraries differ by an order of magnitude, so the deeper matrix is
-        # downsampled to the shallower one's contact count before comparison.
-        # It was previously being passed `bin_sz` positionally into this slot.
+        # the deeper matrix is downsampled to the shallower contact count.
+        seed = _pair_seed(a, b, bin_sz, max_dist, h)
+        np.random.seed(seed)
         scc = np.asarray(
             hicrepSCC(cool_a, cool_b, h, max_dist, True, chrNames=scc_chroms),
             dtype=float,
@@ -126,6 +188,12 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
             "a": Path(a).stem, "b": Path(b).stem,
             "scc": mean_scc, "n_chroms_scored": int(scored.size),
             "min_contacts": int(shallow), "depth_confounded": bool(confounded),
+            "status": (
+                "DEPTH_CONFOUNDED"
+                if confounded
+                else ("PASS" if mean_scc >= threshold else "FAIL")
+            ),
+            "downsample_seed": seed,
         })
         if confounded:
             log.warning(
@@ -134,35 +202,38 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
                 Path(a).stem, Path(b).stem, mean_scc, shallow, min_contacts,
             )
             continue
-        # Only pairs THIS library is in. Every sample of a replicate group receives
-        # the same input list and therefore computes the same set of pairs, so
-        # averaging all of them gave every member of the group one shared verdict --
-        # and that verdict is dominated by the good pairs. Naive_H3K27ac_rep1 holds
-        # 3.3M reads and correlates with its replicates at 0.23, but the group also
-        # contains rep2-vs-rep3 at 0.867, so rep1 was being written out as PASS. A
-        # per-sample QC file has to answer a question about that sample.
+        group_sccs.append(mean_scc)
+        # A per-sample report uses only pairs that contain that sample; group-level
+        # pairs are retained separately for cohort context.
         if this_sample in (Path(a).stem, Path(b).stem):
             sccs.append(mean_scc)
 
+    result["group_n_qualified_pairs"] = len(group_sccs)
+    result["group_status"], result["group_pass"] = _classify_sccs(
+        group_sccs, threshold
+    )
+    if group_sccs:
+        result["group_median_scc"] = float(np.median(group_sccs))
+
     if not sccs:
         result["note"] = (
-            "No replicate pair involving this library cleared the depth floor of "
-            f"{min_contacts} contacts at {bin_sz} bp; SCC would report sequencing "
-            "depth rather than replicate concordance, so it was not assessed."
+            "No replicate pair involving this library both cleared the depth floor "
+            f"of {min_contacts} contacts at {bin_sz} bp and produced a usable SCC; "
+            "replicate concordance was not assessed."
         )
         write_json(result, snakemake.output.json)
         return
 
+    result["n_qualified_pairs"] = len(sccs)
     result["mean_scc"] = float(np.mean(sccs))
+    result["min_scc"] = float(np.min(sccs))
     result["best_scc"] = float(np.max(sccs))
-    # PASS on the BEST-agreeing replicate, not the mean. The question a per-library
-    # QC flag answers is "is this library reproducible", and a library that
-    # reproduces a sibling has answered it. Averaging instead lets one bad sibling
-    # fail a good library: Treg_H3K27ac_rep2 agrees with rep3 at 0.829 and with the
-    # marginal rep1 at 0.488, and the mean of those two (0.659) would fail rep2 for
-    # rep1's shortcoming. rep1 still fails on its own file, which is where it belongs.
-    result["pass"] = result["best_scc"] >= threshold
-    result["status"] = "PASS" if result["pass"] else "FAIL"
+    result["status"], result["pass"] = _classify_sccs(sccs, threshold)
+    if result["status"] == "DISCORDANT":
+        result["note"] = (
+            "Depth-qualified replicate pairs disagree about the SCC threshold; "
+            "inspect every pair rather than selecting the best match."
+        )
     write_json(result, snakemake.output.json)
 
 

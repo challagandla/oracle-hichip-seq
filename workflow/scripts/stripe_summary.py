@@ -15,13 +15,19 @@ res = int(snakemake.params.res)  # noqa: F821
 
 rows = []
 for path, sample in zip(snakemake.input, samples):  # noqa: F821
-    try:
-        df = pd.read_csv(path, sep="\t")
-    except Exception:
-        df = pd.DataFrame()
+    df = pd.read_csv(path, sep="\t")
+    required = {"chr", "pos1", "pos2", "chr2", "pos3", "pos4", "length"}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise ValueError(
+            f"Stripenn output for {sample} is missing required columns {missing}: {path}"
+        )
+    if not df.empty:
+        df["length"] = pd.to_numeric(df["length"], errors="raise")
+        if (df["length"] <= 0).any():
+            raise ValueError(f"Stripenn output has non-positive lengths: {path}")
 
     n = len(df)
-    length_col = "length" if "length" in df.columns else None
     rows.append(
         {
             "sample": sample,
@@ -29,13 +35,13 @@ for path, sample in zip(snakemake.input, samples):  # noqa: F821
             "resolution": res,
             "n_stripes": n,
             "median_length_kb": (
-                round(float(df[length_col].median()) / 1000, 1)
-                if n and length_col
+                round(float(df["length"].median()) / 1000, 1)
+                if n
                 else 0.0
             ),
             "max_length_kb": (
-                round(float(df[length_col].max()) / 1000, 1)
-                if n and length_col
+                round(float(df["length"].max()) / 1000, 1)
+                if n
                 else 0.0
             ),
         }

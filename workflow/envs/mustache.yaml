@@ -5,4 +5,16 @@ channels:
   - bioconda
   - nodefaults
 dependencies:
-  - mustache-hic
+  - python=3.11
+  - pip
+  - cooler=0.10.*
+  - hic-straw=1.3.1
+  - numpy=1.26.*
+  - pandas=2.2.*
+  - scipy=1.13.*
+  - statsmodels=0.14.*
+  - requests=2.*
+  - pip:
+      # Mustache is no longer present in the current Bioconda repodata. The
+      # upstream project publishes this pinned pure-Python wheel on PyPI.
+      - mustache-hic==1.3.3

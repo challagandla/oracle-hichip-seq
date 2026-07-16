@@ -1,18 +1,10 @@
 # FitHiChIP loop calling (stage 05)
 #
-# FitHiChIP is NOT on bioconda. `- fithichip` was declared here and resolves from
-# no channel, so the loop caller — the step every loop in this pipeline depends
-# on — could never be installed and the rule's own error message told the user to
-# `mamba install -c bioconda fithichip`, which cannot work.
+# FitHiChIP is distributed as shell, R, and Python scripts rather than a bioconda
+# package. This file pins its dependency set; the workflow fetches the checksummed
+# upstream tag separately.
 #
-# It is distributed as a GitHub release of shell + R + python scripts. What we pin
-# here is its dependency set (from the upstream Dockerfile at tag 11.0); the
-# workflow fetches the pinned release itself.
-#
-# MACS2 is deliberately absent although the upstream Dockerfile installs it:
-# FitHiChIP only shells out to MACS2 when asked to call peaks itself, and we hand
-# it a PeakFile. Adding it would install a binary that cannot even load on current
-# glibc (see envs/macs3.yaml) for no benefit.
+# MACS2 is unnecessary because the workflow supplies a precomputed PeakFile.
 name: oracle-hichip-fithichip
 channels:
   - conda-forge
@@ -31,6 +23,7 @@ dependencies:
   - htslib=1.20.*
   - bc
   - gawk
+  - coreutils
   - curl
   - r-base=4.3.*
   - r-optparse
@@ -42,10 +35,5 @@ dependencies:
   - r-rcolorbrewer
   - bioconductor-genomicranges
   - bioconductor-edger
-  # FitHiChIP shells out to bedToBigBed to write browser tracks. It is not a
-  # FitHiChIP dependency in any conda sense, so without it here the call falls
-  # through PATH to whatever the host has -- here /home/epigenetics/.local/bin,
-  # whose copy dies on a missing libpng12.so.0. Loop calling itself survives
-  # (exit 0, the interactions BED is written), but the tracks are never produced,
-  # and it is the same failure mode as the host ~/.Rprofile shadowing the env's R.
+  # FitHiChIP shells out to bedToBigBed for browser tracks.
   - ucsc-bedtobigbed

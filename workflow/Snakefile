@@ -1,14 +1,14 @@
 # ORACLE HiChIP pipeline — main Snakefile
 # Run from repository root:
-#   snakemake -s workflow/Snakefile -n --configfile config/config.yaml
-#   snakemake -s workflow/Snakefile --cores 32 --configfile config/config.yaml --use-conda
+#   bash run.sh --dry-run --cores 1
+#   bash run.sh --cores 32
 #
 # Stages:
 #   00_fetch_sra       Download FASTQs from SRA (technical replicates merged)
 #   01_qc_raw          FastQC + fastp adapter/quality trim
 #   02_align_pairs     bwa-mem2 -SP5M + pairtools parse/sort/dedup → .pairs.gz
 #   03_cool_matrix     cooler load + zoomify + balance (ICE)
-#   04_peaks           Extract 1D reads, MACS2 narrow/broad peaks per mark
+#   04_peaks           Extract 1D reads, MACS3 narrow/broad peaks per mark
 #   05_loops_fithichip FitHiChIP Peak-to-ALL loop calling
 #   06_loop_qc         cis/trans, P(s), insulation, APA, HiCRep replicate QC
 #   06b_stripes        architectural stripe calling (Stripenn)
@@ -19,9 +19,11 @@
 
 import os
 import re
+import hashlib
 import yaml
 import pandas as pd
 from pathlib import Path
+import sys
 
 # ---------- Config & sample sheet ----------
 configfile: "config/config.yaml"
@@ -31,23 +33,66 @@ with open(config["genome_yaml"]) as fh:
 ASSEMBLY = config["assembly"]
 GENOME = GENOME_CFG[ASSEMBLY]
 
-SAMPLES = pd.read_csv(config["samples_tsv"], sep="\t", dtype=str, comment="#").set_index("sample_id", drop=False)
+sys.path.insert(0, str(Path("workflow/scripts").resolve()))
+from validate_config import validate_pipeline_config
+
+SAMPLES = pd.read_csv(
+    config["samples_tsv"], sep="\t", dtype=str, comment="#", keep_default_na=False
+)
+validate_pipeline_config(config, GENOME_CFG, SAMPLES)
+ANCHOR_GROUP_BY = list(config["anchor_consensus"]["group_by"])
+
+
+def _anchor_group_key(row):
+    identity = "|".join(f"{column}={row[column]}" for column in ANCHOR_GROUP_BY)
+    mark = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(row["mark"]))
+    return f"{mark}-{hashlib.sha256(identity.encode()).hexdigest()[:12]}"
+
+
+SAMPLES["anchor_group"] = SAMPLES.apply(_anchor_group_key, axis=1)
+SAMPLES = SAMPLES.set_index("sample_id", drop=False)
 SAMPLE_IDS = SAMPLES["sample_id"].tolist()
 MARKS = sorted(SAMPLES["mark"].dropna().unique())
+ANCHOR_GROUPS = sorted(SAMPLES["anchor_group"].unique())
 
 RESULTS = Path(config["results_dir"])
+FASTQ_DIR = Path(config["fastq_dir"])
 FITHICHIP_Q_LABEL = f"Q{config['fithichip']['fdr_threshold']}"
 ORACLE_BIN_SIZES_BP = [int(k) * 1000 for k in config["cooler"]["oracle_bin_sizes_kb"]]
+ORACLE_MICROBIOME_TSV = str(
+    config.get("oracle_export", {}).get("microbiome_metadata_tsv", "") or ""
+).strip()
+
+# Snakemake tracks the primary `script:` file but not Python modules imported by
+# that script. Declaring shared modules as inputs makes parser, normalization, and
+# viewpoint changes invalidate dependent outputs.
+SHARED_SCRIPT_DEPS = [
+    "workflow/scripts/utils.py",
+    "workflow/scripts/balance_utils.py",
+    "workflow/scripts/balance_qc.py",
+    "workflow/scripts/viz_viewpoint.py",
+]
 
 # FitHiChIP names its output directories after the interaction type and bias model,
 # using these strings rather than the numeric codes it takes in the config. Deriving
 # them from the same codes keeps the path we read from in step with the config we
 # write -- FitHiChIP also builds an ALL2ALL directory while computing the background,
 # so reading the wrong one silently returns a different call set.
-_FITHICHIP_INT_DIRS = {1: "Peak2Peak", 2: "Peak2NonPeak", 3: "Peak2ALL", 4: "ALL2ALL"}
-_FITHICHIP_BIAS_DIRS = {1: "Coverage_Bias", 2: "ICE_Bias"}
-FITHICHIP_INT_DIR = _FITHICHIP_INT_DIRS[int(config["fithichip"]["int_type_code"])]
-FITHICHIP_BIAS_DIR = _FITHICHIP_BIAS_DIRS[int(config["fithichip"]["bias_type_code"])]
+_FITHICHIP_INT_TYPES = {
+    "Peak-to-Peak": (1, "Peak2Peak"),
+    "Peak-to-NonPeak": (2, "Peak2NonPeak"),
+    "Peak-to-ALL": (3, "Peak2ALL"),
+    "ALL-to-ALL": (4, "ALL2ALL"),
+}
+_FITHICHIP_BIAS_TYPES = {
+    "Coverage_Bias": (1, "Coverage_Bias"),
+}
+FITHICHIP_INT_CODE, FITHICHIP_INT_DIR = _FITHICHIP_INT_TYPES[
+    config["fithichip"]["interaction_type"]
+]
+FITHICHIP_BIAS_CODE, FITHICHIP_BIAS_DIR = _FITHICHIP_BIAS_TYPES[
+    config["fithichip"]["background_type"]
+]
 FITHICHIP_MERGE = bool(config["fithichip"].get("merge_nearby", True))
 
 _fc = config["fithichip"]
@@ -55,17 +100,25 @@ _FITHICHIP_BASE = (
     f"FitHiChIP_{FITHICHIP_INT_DIR}_b{_fc['bin_size']}"
     f"_L{_fc['lower_distance']}_U{_fc['upper_distance']}"
 )
-# The P2PBckgr_<n> level only exists when the peak-to-peak background is in use.
-_FITHICHIP_PARTS = [_FITHICHIP_BASE]
-if _fc.get("use_p2p_background", 1):
-    _FITHICHIP_PARTS.append(f"P2PBckgr_{_fc['use_p2p_background']}")
-_FITHICHIP_PARTS += [FITHICHIP_BIAS_DIR, "FitHiC_BiasCorr"]
+# FitHiChIP 11.0 always inserts P2PBckgr_0 or P2PBckgr_1 for Peak2ALL,
+# including the loose-background value 0. Other interaction types never have
+# this directory level. Keep the unmerged FitHiC_BiasCorr directory separate:
+# its PREFIX.interactions_FitHiC.bed is the q-unthresholded differential input.
+_FITHICHIP_CORE_PARTS = [_FITHICHIP_BASE]
+if FITHICHIP_INT_DIR == "Peak2ALL":
+    _FITHICHIP_CORE_PARTS.append(
+        f"P2PBckgr_{int(_fc.get('use_p2p_background', 1))}"
+    )
+_FITHICHIP_CORE_PARTS += [FITHICHIP_BIAS_DIR, "FitHiC_BiasCorr"]
+FITHICHIP_ALL_RESULT_DIR = "/".join(_FITHICHIP_CORE_PARTS)
+_FITHICHIP_PARTS = list(_FITHICHIP_CORE_PARTS)
 
-# FitHiChIP emits BOTH a raw call set and, under Merge_Nearby_Interactions/, the same
-# set with adjacent significant bin pairs collapsed into one contact. The raw set
-# reports a single physical loop once per adjacent bin pair it spans -- 30,903 raw
-# against 17,875 merged on Th17_H3K27ac_rep1, i.e. 42% redundant. Setting MergeInt=1
-# only makes FitHiChIP WRITE the merged file; it still has to be the one read.
+# FitHiChIP emits both raw calls and, under Merge_Nearby_Interactions/, adjacent
+# nearby-bin post-processing. It can retain more than one representative row per
+# connected neighbourhood. Differential testing uses exact native pixels with zero
+# tolerance; only the separate FitHiChIP-versus-Mustache descriptive comparison
+# allows grid tolerance. MergeInt controls generation; this selects the reporting
+# call set consumed by the non-differential stages.
 if FITHICHIP_MERGE:
     _FITHICHIP_PARTS.append("Merge_Nearby_Interactions")
     FITHICHIP_RESULT_FILE = (
@@ -94,7 +147,8 @@ DIFF_COMPARISON_NAMES = [c["name"] for c in config.get("differential", {}).get("
 wildcard_constraints:
     sample = "|".join(re.escape(s) for s in SAMPLE_IDS),
     res    = r"\d+",
-    mark   = r"[A-Za-z0-9]+",
+    mark   = "|".join(re.escape(mark) for mark in MARKS),
+    anchor_group = "|".join(re.escape(group) for group in ANCHOR_GROUPS),
     region = "|".join(re.escape(r) for r in VIZ_REGION_NAMES) or r"[A-Za-z0-9_\-]+",
     comparison = ("|".join(re.escape(c) for c in DIFF_COMPARISON_NAMES)
                   or r"[A-Za-z0-9_\-]+")
@@ -113,24 +167,37 @@ include: "rules/08_viz.smk"
 include: "rules/09_export_oracle.smk"
 include: "rules/10_multiqc.smk"
 include: "rules/11_figures.smk"
+include: "rules/12_provenance.smk"
 
 # ---------- Top-level targets ----------
 rule all:
+    default_target: True
     input:
         # Per-sample core artefacts
         expand(RESULTS / "cool/{sample}.mcool", sample=SAMPLE_IDS),
+        expand(RESULTS / "qc/balance/{sample}.balance.json", sample=SAMPLE_IDS),
+        expand(RESULTS / "qc/balance/{sample}.balance.tsv", sample=SAMPLE_IDS),
+        expand(RESULTS / "qc/balance/{sample}_balance_mqc.json", sample=SAMPLE_IDS),
         expand(RESULTS / "peaks/{sample}_peaks.bed", sample=SAMPLE_IDS),
         expand(RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed", sample=SAMPLE_IDS),
+        expand(RESULTS / "loops/{sample}/{sample}.interactions_FitHiC.all.tsv.gz", sample=SAMPLE_IDS),
+        expand(RESULTS / "loops/{sample}/{sample}.interactions_FitHiC.eligible.tsv.gz", sample=SAMPLE_IDS),
+        expand(RESULTS / "loops/{sample}/{sample}.interactions_FitHiC.all.audit.json", sample=SAMPLE_IDS),
+        *(expand(RESULTS / "loops/{sample}/{sample}.mustache.tsv", sample=SAMPLE_IDS)
+          if config.get("mustache", {}).get("enabled") else []),
+        *(expand(RESULTS / "loops/{sample}/{sample}.mustache.status.json", sample=SAMPLE_IDS)
+          if config.get("mustache", {}).get("enabled") else []),
         expand(RESULTS / "qc/loop_qc/{sample}.json", sample=SAMPLE_IDS),
+        expand(RESULTS / "qc/loop_qc/{sample}_loop_qc_mqc.json", sample=SAMPLE_IDS),
+        expand(RESULTS / "qc/apa/{sample}_apa_mqc.json", sample=SAMPLE_IDS),
+        expand(RESULTS / "qc/compartments/{sample}.E1.bw", sample=SAMPLE_IDS),
         # ORACLE-ready exports
         expand(RESULTS / "oracle_cos/{sample}.pt", sample=SAMPLE_IDS),
         # Visualisation
         expand(RESULTS / "viz/{sample}_{region}.png",
                sample=SAMPLE_IDS,
                region=[r["name"] for r in config["viz"]["regions"]]),
-        # Virtual 4C from each locus viewpoint. The rule existed but was reachable
-        # from no target, so it never ran -- and it is the view that shows an
-        # enhancer looking at its target gene, which is the point of the cohort.
+        # Virtual 4C profile from each explicitly configured locus viewpoint.
         expand(RESULTS / "viz/virtual_4c/{sample}_{region}.v4c.png",
                sample=SAMPLE_IDS,
                region=[r["name"] for r in config["viz"]["regions"]]),
@@ -143,6 +210,7 @@ rule all:
         RESULTS / "multiqc/multiqc_report.html",
         # Cohort publication figures
         RESULTS / "figures/library_summary.tsv",
+        RESULTS / "provenance/run_manifest.json",
 
 # ---------- Convenience phony targets ----------
 rule qc_raw:
@@ -155,7 +223,9 @@ rule align_pairs:
 
 rule cool_matrix:
     input:
-        expand(RESULTS / "cool/{sample}.mcool", sample=SAMPLE_IDS)
+        expand(RESULTS / "cool/{sample}.mcool", sample=SAMPLE_IDS),
+        expand(RESULTS / "qc/balance/{sample}.balance.json", sample=SAMPLE_IDS),
+        expand(RESULTS / "qc/balance/{sample}.balance.tsv", sample=SAMPLE_IDS)
 
 rule peaks:
     input:
@@ -163,11 +233,19 @@ rule peaks:
 
 rule loops_fithichip:
     input:
-        expand(RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed", sample=SAMPLE_IDS)
+        expand(RESULTS / f"loops/{{sample}}/{{sample}}.interactions_FitHiC_{FITHICHIP_Q_LABEL}.bed", sample=SAMPLE_IDS),
+        expand(RESULTS / "loops/{sample}/{sample}.interactions_FitHiC.all.tsv.gz", sample=SAMPLE_IDS),
+        expand(RESULTS / "loops/{sample}/{sample}.interactions_FitHiC.eligible.tsv.gz", sample=SAMPLE_IDS),
+        expand(RESULTS / "loops/{sample}/{sample}.interactions_FitHiC.all.audit.json", sample=SAMPLE_IDS)
 
 rule loop_qc:
     input:
-        expand(RESULTS / "qc/loop_qc/{sample}.json", sample=SAMPLE_IDS)
+        expand(RESULTS / "qc/balance/{sample}.balance.json", sample=SAMPLE_IDS),
+        expand(RESULTS / "qc/balance/{sample}.balance.tsv", sample=SAMPLE_IDS),
+        expand(RESULTS / "qc/balance/{sample}_balance_mqc.json", sample=SAMPLE_IDS),
+        expand(RESULTS / "qc/loop_qc/{sample}.json", sample=SAMPLE_IDS),
+        expand(RESULTS / "qc/loop_qc/{sample}_loop_qc_mqc.json", sample=SAMPLE_IDS),
+        expand(RESULTS / "qc/compartments/{sample}.E1.bw", sample=SAMPLE_IDS)
 
 rule export_oracle:
     input:

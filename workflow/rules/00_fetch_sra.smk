@@ -29,13 +29,13 @@ rule fetch_sra:
     silently loses the tail. Better to fail here.
     """
     output:
-        r1 = "data/fastq/{sample}_R1.fastq.gz",
-        r2 = "data/fastq/{sample}_R2.fastq.gz",
+        r1 = FASTQ_DIR / "{sample}_R1.fastq.gz",
+        r2 = FASTQ_DIR / "{sample}_R2.fastq.gz",
     wildcard_constraints:
         sample = "|".join(re.escape(s) for s in SRA_SAMPLES) if SRA_SAMPLES else "$^",
     params:
         srrs = lambda wc: " ".join(_srrs_for(wc.sample)),
-        tmp = lambda wc: f"data/sra_tmp/{wc.sample}",
+        tmp = lambda wc: str(FASTQ_DIR.parent / f"sra_tmp/{wc.sample}"),
     threads: 6
     conda: "../envs/sra.yaml"
     log:
@@ -43,11 +43,14 @@ rule fetch_sra:
     shell:
         r"""
         set -euo pipefail
-        mkdir -p data/fastq {params.tmp} $(dirname {log})
+        mkdir -p $(dirname {output.r1}) {params.tmp} $(dirname {log})
 
         r1s=""; r2s=""
         for srr in {params.srrs}; do
-            if [ ! -s {params.tmp}/${{srr}}_1.fastq ]; then
+            # A prior interrupted fasterq-dump may leave only one mate. Never
+            # accept that half-download as a reusable cache entry.
+            if [ ! -s {params.tmp}/${{srr}}_1.fastq ] || [ ! -s {params.tmp}/${{srr}}_2.fastq ]; then
+                rm -f {params.tmp}/${{srr}}_1.fastq {params.tmp}/${{srr}}_2.fastq
                 fasterq-dump --split-files --threads {threads} \
                     --temp {params.tmp} -O {params.tmp} "$srr" >> {log} 2>&1
             fi
@@ -62,8 +65,17 @@ rule fetch_sra:
         cat $r1s | pigz -p {threads} -c > {output.r1}.part
         cat $r2s | pigz -p {threads} -c > {output.r2}.part
 
-        n1=$(( $(pigz -dc {output.r1}.part | wc -l) / 4 ))
-        n2=$(( $(pigz -dc {output.r2}.part | wc -l) / 4 ))
+        pigz -t {output.r1}.part
+        pigz -t {output.r2}.part
+        lines1=$(pigz -dc {output.r1}.part | wc -l)
+        lines2=$(pigz -dc {output.r2}.part | wc -l)
+        if [ $((lines1 % 4)) -ne 0 ] || [ $((lines2 % 4)) -ne 0 ]; then
+            echo "FASTQ line count is not divisible by four: R1=$lines1 R2=$lines2" >> {log}
+            rm -f {output.r1}.part {output.r2}.part
+            exit 1
+        fi
+        n1=$(( lines1 / 4 ))
+        n2=$(( lines2 / 4 ))
         if [ "$n1" -ne "$n2" ]; then
             echo "R1 has $n1 reads but R2 has $n2: truncated download" >> {log}
             rm -f {output.r1}.part {output.r2}.part

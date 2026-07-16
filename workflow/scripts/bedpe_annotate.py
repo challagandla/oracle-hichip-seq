@@ -1,8 +1,4 @@
-"""
-Annotate loop anchors with overlapping peaks and the nearest gene / TSS,
-and flag anchors that overlap CTCF sites and super-enhancers (if provided
-via config). Writes an annotated BEDPE.
-"""
+"""Annotate loop anchors with peak overlap and nearest-gene/TSS context."""
 import sys
 from pathlib import Path
 
@@ -17,7 +13,11 @@ def _gtf_to_tss(gtf: str | Path) -> pr.PyRanges:
     df = pr.read_gtf(str(gtf)).df
     genes = df[df["Feature"] == "gene"][["Chromosome", "Start", "End", "Strand", "gene_name", "gene_id"]].copy()
     # TSS = 5' end based on strand
-    genes["tss"] = genes.apply(lambda r: r.Start if r.Strand == "+" else r.End, axis=1)
+    # PyRanges uses 0-based half-open intervals. The minus-strand TSS is the
+    # final covered base, End - 1, rather than the first base beyond the gene.
+    genes["tss"] = genes.apply(
+        lambda r: r.Start if r.Strand == "+" else r.End - 1, axis=1
+    )
     genes["End"] = genes["tss"] + 1
     genes["Start"] = genes["tss"]
     return pr.PyRanges(genes.rename(columns={"gene_name": "Name"}))
@@ -66,7 +66,9 @@ def main(snakemake) -> None:  # type: ignore[no-untyped-def]
                     on="loop_idx", how="left")
     out["both_anchors_have_peak"] = (out["peak_n_side1"] > 0) & (out["peak_n_side2"] > 0)
     out["promoter_promoter"] = (out["distance_to_tss_side1"].abs() <= 2000) & (out["distance_to_tss_side2"].abs() <= 2000)
-    out["enhancer_promoter"] = (
+    # A distal anchor is not automatically an enhancer and a nearest gene is not
+    # automatically its target. Keep the label purely positional.
+    out["promoter_distal"] = (
         ((out["distance_to_tss_side1"].abs() <= 2000) & (out["distance_to_tss_side2"].abs() > 2000)) |
         ((out["distance_to_tss_side2"].abs() <= 2000) & (out["distance_to_tss_side1"].abs() > 2000))
     )
